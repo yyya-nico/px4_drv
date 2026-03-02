@@ -88,33 +88,4 @@ struct ptxt_stats {
 #define PTXT_SET_CAPTURE	_IOW(0xe7, 0x06, bool)
 #define PTXT_READ_STATS		_IOR(0xe7, 0x07, struct ptxt_stats *)
 
-// B-CAS Smart Card ioctls
-
-enum ptx_bcas_baudrate {
-	PTX_BCAS_BAUDRATE_9600 = 0,
-	PTX_BCAS_BAUDRATE_19200 = 1,
-	PTX_BCAS_BAUDRATE_38400 = 2,
-	PTX_BCAS_BAUDRATE_57600 = 3,
-	PTX_BCAS_BAUDRATE_115200 = 4
-};
-
-struct ptx_bcas_data {
-	__u8 *buf;
-	__u8 len;
-};
-
-struct ptx_bcas_detect_card {
-	__u8 detected;
-};
-
-struct ptx_bcas_set_baudrate {
-	enum ptx_bcas_baudrate baudrate;
-};
-
-#define PTX_BCAS_DETECT_CARD	_IOR(0xe8, 0x01, struct ptx_bcas_detect_card)
-#define PTX_BCAS_RESET_CARD	_IO(0xe8, 0x02)
-#define PTX_BCAS_SEND_DATA	_IOW(0xe8, 0x03, struct ptx_bcas_data)
-#define PTX_BCAS_RCV_DATA	_IOR(0xe8, 0x04, struct ptx_bcas_data)
-#define PTX_BCAS_SET_BAUDRATE	_IOW(0xe8, 0x05, struct ptx_bcas_set_baudrate)
-
 #endif
