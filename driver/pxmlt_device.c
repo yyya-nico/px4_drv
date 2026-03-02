@@ -1024,6 +1024,10 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	if (ret)
 		goto fail_device;
 
+	ret = it930x_bcas_init(it930x);
+	if (ret)
+		goto fail_device;
+
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 7, IT930X_GPIO_OUT, true);
 	if (ret)
