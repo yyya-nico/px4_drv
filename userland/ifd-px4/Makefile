@@ -1,7 +1,7 @@
 # Makefile for PX4 IFD Handler
 
 CC = gcc
-CFLAGS = -Wall -O2 -fPIC -I../../include
+CFLAGS = -Wall -O2 -fPIC -I../../include -I/usr/include/PCSC
 LDFLAGS = -shared
 
 TARGET = libpx4ifd.so
