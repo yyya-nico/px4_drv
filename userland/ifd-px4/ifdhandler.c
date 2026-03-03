@@ -54,15 +54,15 @@ static struct reader_context *get_reader(DWORD Lun)
 }
 
 /*
- * IFDHCreateChannelByName
+ * IFDHCreateChannel
  * Opens a communication channel to the device
  */
-RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
+RESPONSECODE IFDHCreateChannel(DWORD Lun, LPSTR DeviceName)
 {
 	struct reader_context *ctx;
 	int idx = get_reader_index(Lun);
 
-	Log1(PCSC_LOG_INFO, "IFDHCreateChannelByName");
+	Log1(PCSC_LOG_INFO, "IFDHCreateChannel");
 
 	if (idx < 0 || idx >= MAX_READERS) {
 		Log1(PCSC_LOG_ERROR, "Invalid LUN");
