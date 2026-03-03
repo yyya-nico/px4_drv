@@ -26,7 +26,7 @@
 
 #define MAX_READERS 16
 #define MAX_ATR_SIZE 33
-#define MAX_BUFFER_SIZE 256
+/* MAX_BUFFER_SIZE is defined in pcsclite.h as 264 */
 
 /* Reader context */
 struct reader_context {
@@ -62,7 +62,7 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 	struct reader_context *ctx;
 	int idx = get_reader_index(Lun);
 
-	Log2(PCSC_LOG_INFO, "IFDHCreateChannelByName: Lun=0x%08X, Device=%s", Lun, DeviceName);
+	Log1(PCSC_LOG_INFO, "IFDHCreateChannelByName");
 
 	if (idx < 0 || idx >= MAX_READERS) {
 		Log1(PCSC_LOG_ERROR, "Invalid LUN");
@@ -75,12 +75,12 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 	/* Open device */
 	ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
 	if (ctx->fd < 0) {
-		Log3(PCSC_LOG_ERROR, "Failed to open %s: %s", DeviceName, strerror(errno));
+		Log1(PCSC_LOG_ERROR, "Failed to open device");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
 	strncpy(ctx->device_name, DeviceName, sizeof(ctx->device_name) - 1);
-	Log2(PCSC_LOG_INFO, "Opened %s (fd=%d)", DeviceName, ctx->fd);
+	Log1(PCSC_LOG_INFO, "Device opened");
 
 	return IFD_SUCCESS;
 }
@@ -113,7 +113,7 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 {
 	struct reader_context *ctx = get_reader(Lun);
 
-	Log2(PCSC_LOG_INFO, "IFDHGetCapabilities: Tag=0x%08X", Tag);
+	Log1(PCSC_LOG_INFO, "IFDHGetCapabilities");
 
 	if (!ctx || ctx->fd < 0)
 		return IFD_COMMUNICATION_ERROR;
@@ -150,7 +150,7 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 		break;
 
 	default:
-		Log2(PCSC_LOG_ERROR, "Unknown tag: 0x%08X", Tag);
+		Log1(PCSC_LOG_ERROR, "Unknown tag");
 		return IFD_ERROR_TAG;
 	}
 
@@ -164,7 +164,7 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 RESPONSECODE IFDHSetCapabilities(DWORD Lun, DWORD Tag,
 				 DWORD Length, PUCHAR Value)
 {
-	Log2(PCSC_LOG_INFO, "IFDHSetCapabilities: Tag=0x%08X (not supported)", Tag);
+	Log1(PCSC_LOG_INFO, "IFDHSetCapabilities (not supported)");
 	return IFD_NOT_SUPPORTED;
 }
 
@@ -178,7 +178,7 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 {
 	struct reader_context *ctx = get_reader(Lun);
 
-	Log2(PCSC_LOG_INFO, "IFDHSetProtocolParameters: Protocol=%d", Protocol);
+	Log1(PCSC_LOG_INFO, "IFDHSetProtocolParameters");
 
 	if (!ctx || ctx->fd < 0)
 		return IFD_COMMUNICATION_ERROR;
@@ -188,7 +188,7 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 
 	/* PX4 B-CAS cards typically use T=1 protocol */
 	if (Protocol != SCARD_PROTOCOL_T0 && Protocol != SCARD_PROTOCOL_T1) {
-		Log2(PCSC_LOG_ERROR, "Unsupported protocol: %d", Protocol);
+		Log1(PCSC_LOG_ERROR, "Unsupported protocol");
 		return IFD_PROTOCOL_NOT_SUPPORTED;
 	}
 
@@ -206,7 +206,7 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 	struct px4_card_atr atr_data;
 	int ret;
 
-	Log2(PCSC_LOG_INFO, "IFDHPowerICC: Action=%d", Action);
+	Log1(PCSC_LOG_INFO, "IFDHPowerICC");
 
 	if (!ctx || ctx->fd < 0)
 		return IFD_COMMUNICATION_ERROR;
@@ -217,19 +217,19 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Reset card */
 		ret = ioctl(ctx->fd, PX4CARD_RESET);
 		if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "PX4CARD_RESET failed: %s", strerror(errno));
+			Log1(PCSC_LOG_ERROR, "PX4CARD_RESET failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
 
 		/* Get ATR */
 		ret = ioctl(ctx->fd, PX4CARD_GET_ATR, &atr_data);
 		if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "PX4CARD_GET_ATR failed: %s", strerror(errno));
+			Log1(PCSC_LOG_ERROR, "PX4CARD_GET_ATR failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
 
 		if (atr_data.length == 0 || atr_data.length > MAX_ATR_SIZE) {
-			Log2(PCSC_LOG_ERROR, "Invalid ATR length: %d", atr_data.length);
+			Log1(PCSC_LOG_ERROR, "Invalid ATR length");
 			return IFD_COMMUNICATION_ERROR;
 		}
 
@@ -246,7 +246,7 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		memcpy(Atr, atr_data.data, atr_data.length);
 		*AtrLength = atr_data.length;
 
-		Log2(PCSC_LOG_INFO, "ATR received: %d bytes", atr_data.length);
+		Log1(PCSC_LOG_INFO, "ATR received");
 		LogXxd(PCSC_LOG_INFO, "ATR:", Atr, *AtrLength);
 		break;
 
@@ -256,7 +256,7 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		break;
 
 	default:
-		Log2(PCSC_LOG_ERROR, "Unknown power action: %d", Action);
+			Log1(PCSC_LOG_ERROR, "Unknown power action");
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -278,8 +278,7 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	struct timeval timeout;
 	int ret;
 
-	Log3(PCSC_LOG_INFO, "IFDHTransmitToICC: Protocol=%d, TxLen=%d", 
-	     SendPci.Protocol, TxLength);
+	Log1(PCSC_LOG_INFO, "IFDHTransmitToICC");
 	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
 
 	if (!ctx || ctx->fd < 0)
@@ -291,12 +290,12 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	/* Send data */
 	sent = write(ctx->fd, TxBuffer, TxLength);
 	if (sent < 0) {
-		Log2(PCSC_LOG_ERROR, "Write failed: %s", strerror(errno));
+		Log1(PCSC_LOG_ERROR, "Write failed");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
 	if ((size_t)sent != TxLength) {
-		Log3(PCSC_LOG_ERROR, "Partial write: %d/%d", sent, TxLength);
+		Log1(PCSC_LOG_ERROR, "Partial write");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
@@ -308,7 +307,7 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 
 	ret = select(ctx->fd + 1, &readfds, NULL, NULL, &timeout);
 	if (ret < 0) {
-		Log2(PCSC_LOG_ERROR, "Select failed: %s", strerror(errno));
+		Log1(PCSC_LOG_ERROR, "Select failed");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
@@ -320,13 +319,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	/* Receive response */
 	received = read(ctx->fd, RxBuffer, *RxLength);
 	if (received < 0) {
-		Log2(PCSC_LOG_ERROR, "Read failed: %s", strerror(errno));
+		Log1(PCSC_LOG_ERROR, "Read failed");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
 	*RxLength = received;
 
-	Log2(PCSC_LOG_INFO, "RX: %d bytes", received);
+	Log1(PCSC_LOG_INFO, "RX completed");
 	LogXxd(PCSC_LOG_INFO, "RX:", RxBuffer, *RxLength);
 
 	if (RecvPci)
@@ -344,7 +343,7 @@ RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 			 PUCHAR RxBuffer, DWORD RxLength,
 			 LPDWORD pdwBytesReturned)
 {
-	Log2(PCSC_LOG_INFO, "IFDHControl: ControlCode=0x%08X (not supported)", dwControlCode);
+	Log1(PCSC_LOG_INFO, "IFDHControl (not supported)");
 	return IFD_ERROR_NOT_SUPPORTED;
 }
 
@@ -363,11 +362,11 @@ RESPONSECODE IFDHICCPresence(DWORD Lun)
 
 	ret = ioctl(ctx->fd, PX4CARD_DETECT, &detected);
 	if (ret < 0) {
-		Log2(PCSC_LOG_ERROR, "PX4CARD_DETECT failed: %s", strerror(errno));
+		Log1(PCSC_LOG_ERROR, "PX4CARD_DETECT failed");
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	Log2(PCSC_LOG_DEBUG, "Card presence: %s", detected ? "present" : "absent");
+	Log1(PCSC_LOG_DEBUG, "Card presence check");
 
 	return detected ? IFD_ICC_PRESENT : IFD_ICC_NOT_PRESENT;
 }
