@@ -54,6 +54,16 @@ static struct reader_context *get_reader(DWORD Lun)
 }
 
 /*
+ * IFDHCreateChannel
+ * Opens a communication channel to the device
+ */
+RESPONSECODE IFDHCreateChannel(DWORD Lun, DWORD Channel)
+{
+    Log1(PCSC_LOG_ERROR, "IFDHCreateChannel: Use IFDHCreateChannelByName instead");
+    return IFD_COMMUNICATION_ERROR;
+}
+
+/*
  * IFDHCreateChannelByName
  * Opens a communication channel to the device
  */
