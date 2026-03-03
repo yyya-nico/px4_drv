@@ -35,7 +35,12 @@ make
 cd userland/ifd-px4
 sudo make install
 
-# pcscd設定をコピー
+# pcscd設定
+
+# 使うチューナーのコメント解除
+vi px4card.conf
+
+# コピー
 sudo install -m 644 px4card.conf /etc/reader.conf.d/
 ```
 
@@ -48,7 +53,7 @@ sudo install -m 644 px4card.conf /etc/reader.conf.d/
 sudo modprobe px4_drv
 
 # デバイスノードの確認
-ls -l /dev/px4card*
+ls -l /dev/px*
 # 出力例: crw-rw-rw- 1 root video 249, 0 Mar  3 12:34 /dev/px4card0
 ```
 
@@ -101,7 +106,7 @@ pcsc_scan
 dmesg | grep px4
 
 # デバイスファイルの存在確認
-ls -l /dev/px4card*
+ls -l /dev/px*
 
 # カードが挿入されているか確認（ioctlテスト）
 sudo cat /dev/px4card0 | hexdump -C
@@ -142,7 +147,7 @@ sudo pcscd -f -d -a
          ↓ UART
    [IT930x ブリッジ]
          ↓
-   [B-CASスマートカード]
+   [スマートカード]
 ```
 
 ### 対応プロトコル
