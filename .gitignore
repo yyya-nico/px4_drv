@@ -2,6 +2,7 @@
 Module.symvers
 modules.order
 *.o
+*.so
 *.rc
 *.ko
 *.o.cmd
