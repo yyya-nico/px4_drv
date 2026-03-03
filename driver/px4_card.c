@@ -129,12 +129,6 @@ static int px4card_fops_open(struct inode *inode, struct file *file)
 		goto exit;
 	}
 
-	if (!card_ctx->card_present) {
-		dev_info(card_ctx->dev, "px4card_fops_open: no card present\n");
-		ret = -ENODEV;
-		goto exit;
-	}
-
 	file->private_data = card_ctx;
 	dev_dbg(card_ctx->dev, "px4card_fops_open: device opened\n");
 
