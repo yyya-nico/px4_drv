@@ -1043,6 +1043,14 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 	if (ret)
 		goto fail_device;
 
+	/* Register smart card device */
+	ret = px4_card_register(&isdb2056->card_ctx, dev, "isdb2056card", it930x,
+				&isdb2056->kref, isdb2056_device_release);
+	if (ret) {
+		dev_warn(dev, "isdb2056_device_init: failed to register card device. (ret: %d)\n", ret);
+		/* Non-fatal error - continue without card support */
+	}
+
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 3, IT930X_GPIO_OUT, true);
 	if (ret)
@@ -1143,6 +1151,10 @@ void isdb2056_device_term(struct isdb2056_device *isdb2056)
 		kref_read(&isdb2056->kref));
 
 	atomic_xchg(&isdb2056->available, 0);
+	
+	/* Unregister smart card device */
+	px4_card_unregister(&isdb2056->card_ctx);
+	
 	ptx_chrdev_group_destroy(isdb2056->chrdev_group);
 
 	kref_put(&isdb2056->kref, isdb2056_device_release);

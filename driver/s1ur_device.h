@@ -18,6 +18,7 @@
 #include "it930x.h"
 #include "tc90522.h"
 #include "r850.h"
+#include "px4_card.h"
 
 #define S1UR_CHRDEV_NUM	1
 #define ISDBT2071_CHRDEV_NUM	1
@@ -43,6 +44,7 @@ struct s1ur_device {
 	struct ptx_chrdev_group *chrdev_group;
 	struct s1ur_chrdev chrdevs1ur;
 	struct it930x_bridge it930x;
+	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
 

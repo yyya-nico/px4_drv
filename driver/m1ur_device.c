@@ -988,6 +988,14 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 	if (ret)
 		goto fail_device;
 
+	/* Register smart card device */
+	ret = px4_card_register(&m1ur->card_ctx, dev, "pxm1urcard", it930x,
+				&m1ur->kref, m1ur_device_release);
+	if (ret) {
+		dev_warn(dev, "m1ur_device_init: failed to register card device. (ret: %d)\n", ret);
+		/* Non-fatal error - continue without card support */
+	}
+
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 3, IT930X_GPIO_OUT, true);
 	if (ret)
@@ -1088,6 +1096,10 @@ void m1ur_device_term(struct m1ur_device *m1ur)
 		kref_read(&m1ur->kref));
 
 	atomic_xchg(&m1ur->available, 0);
+	
+	/* Unregister smart card device */
+	px4_card_unregister(&m1ur->card_ctx);
+	
 	ptx_chrdev_group_destroy(m1ur->chrdev_group);
 
 	kref_put(&m1ur->kref, m1ur_device_release);

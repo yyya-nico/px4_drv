@@ -19,6 +19,7 @@
 #include "it930x.h"
 #include "cxd2856er.h"
 #include "cxd2858er.h"
+#include "px4_card.h"
 
 #define PXMLT_CHRDEV_MAX_NUM	5
 
@@ -59,6 +60,7 @@ struct pxmlt_device {
 	int chrdevm_num;
 	struct pxmlt_chrdev chrdevm[PXMLT_CHRDEV_MAX_NUM];
 	struct it930x_bridge it930x;
+	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
 

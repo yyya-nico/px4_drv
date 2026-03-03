@@ -19,6 +19,7 @@
 #include "tc90522.h"
 #include "r850.h"
 #include "rt710.h"
+#include "px4_card.h"
 
 #define ISDB2056_CHRDEV_NUM	1
 
@@ -45,6 +46,7 @@ struct isdb2056_device {
 	struct ptx_chrdev_group *chrdev_group;
 	struct isdb2056_chrdev chrdev2056;
 	struct it930x_bridge it930x;
+	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
 

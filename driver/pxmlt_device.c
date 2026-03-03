@@ -932,6 +932,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 		      struct completion *quit_completion)
 {
 	int ret = 0, i;
+	const char *card_devname = "pxmlt5card";
 	struct it930x_bridge *it930x;
 	struct itedtv_bus *bus;
 	struct ptx_chrdev_config chrdev_config[PXMLT_CHRDEV_MAX_NUM];
@@ -958,14 +959,18 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	switch (model) {
 	case PXMLT8PE3_MODEL:
 		pxmlt->chrdevm_num = 3;
+		card_devname = "pxmlt8card";
 		break;
 
 	case ISDB6014_4TS_MODEL:
 		pxmlt->chrdevm_num = 4;
+		card_devname = "isdb6014card";
 		break;
 
 	default:
 		pxmlt->chrdevm_num = 5;
+		if (model == PXMLT8PE5_MODEL)
+			card_devname = "pxmlt8card";
 		break;
 	}
 
@@ -1027,6 +1032,14 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	ret = it930x_bcas_init(it930x);
 	if (ret)
 		goto fail_device;
+
+	/* Register smart card device */
+	ret = px4_card_register(&pxmlt->card_ctx, dev, card_devname, it930x,
+				&pxmlt->kref, pxmlt_device_release);
+	if (ret) {
+		dev_warn(dev, "pxmlt_device_init: failed to register card device. (ret: %d)\n", ret);
+		/* Non-fatal error - continue without card support */
+	}
 
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 7, IT930X_GPIO_OUT, true);
@@ -1136,6 +1149,10 @@ void pxmlt_device_term(struct pxmlt_device *pxmlt)
 	dev_dbg(pxmlt->dev, "pxmlt_device_term\n");
 
 	atomic_xchg(&pxmlt->available, 0);
+	
+	/* Unregister smart card device */
+	px4_card_unregister(&pxmlt->card_ctx);
+	
 	ptx_chrdev_group_destroy(pxmlt->chrdev_group);
 
 	kref_put(&pxmlt->kref, pxmlt_device_release);

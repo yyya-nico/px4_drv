@@ -90,6 +90,36 @@ PLEX 社の [Webサイト](http://plex-net.co.jp) にて配布されている公
 > [stz2012/recpt1](https://github.com/stz2012/recpt1) や [recisdb](https://github.com/kazuki0824/recisdb-rs) では、当該機種にて C13ch ~ C62ch を正常に選局できないことが報告されています（[詳細はこちら](https://github.com/tsukumijima/px4_drv/issues/16)）。  
 > ただし、C13ch ~ C24ch 以外のチャンネルであれば、stz2012/recpt1 や recisdb でも問題なく選局・受信が可能です。
 
+## スマートカード機能 (Linux版のみ)
+
+Linux版では、スマートカードを標準的なPC/SCインターフェース経由で利用できる機能を提供しています。
+
+### 特徴
+
+- `/dev/px4card*` デバイスノード経由でスマートカードにアクセス可能
+- `pcscd`（PC/SC daemon）対応により、標準的なスマートカードツールが利用可能
+- チューナー機能とは独立して動作
+
+### 使い方
+
+詳しくは [userland/ifd-px4/README.md](userland/ifd-px4/README.md) を参照してください。
+
+```bash
+# IFDハンドラーのビルドとインストール
+cd userland/ifd-px4
+make
+sudo make install
+
+# pcscd設定のインストール
+sudo install -m 644 px4card.conf /etc/reader.conf.d/
+
+# pcscdの再起動
+sudo systemctl restart pcscd
+
+# カードリーダーの確認
+pcsc_scan
+```
+
 ## インストール (Windows)
 
 Windows (WinUSB) 版のドライバは、OS にチューナーを認識させるための inf ファイルと、px4_drv 専用の BonDriver、ドライバの実体でチューナー操作を司る DriverHost_PX4 から構成されています。
