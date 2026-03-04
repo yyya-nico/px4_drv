@@ -19,7 +19,6 @@
 #include "it930x.h"
 
 #define PX4CARD_CHRDEV_NUM	16
-#define PX4CARD_DEVNAME		"px4card"
 
 static dev_t px4card_dev_first;
 static struct class *px4card_class;
@@ -109,7 +108,6 @@ static int px4card_receive_atr(struct px4_card_context *card_ctx,
 static int px4card_fops_open(struct inode *inode, struct file *file)
 {
 	struct px4_card_context *card_ctx;
-	int ret = 0;
 
 	card_ctx = container_of(inode->i_cdev, struct px4_card_context, cdev);
 
@@ -122,23 +120,12 @@ static int px4card_fops_open(struct inode *inode, struct file *file)
 
 	mutex_lock(&card_ctx->lock);
 
-	/* Check if card is present */
-	ret = it930x_bcas_detect_card(card_ctx->it930x, &card_ctx->card_present);
-	if (ret) {
-		dev_err(card_ctx->dev, "px4card_fops_open: failed to detect card. (ret: %d)\n", ret);
-		goto exit;
-	}
-
 	file->private_data = card_ctx;
 	dev_dbg(card_ctx->dev, "px4card_fops_open: device opened\n");
 
 exit:
-	if (ret) {
-		atomic_set(&card_ctx->open, 0);
-		kref_put(card_ctx->owner_kref, card_ctx->owner_kref_release);
-	}
 	mutex_unlock(&card_ctx->lock);
-	return ret;
+	return 0;
 }
 
 /* File operations: release */
@@ -418,23 +405,27 @@ static const struct file_operations px4card_fops = {
 };
 
 /* Initialize device node infrastructure */
-int px4_card_init_dev_node(void)
+int px4_card_init_dev_node(const char *devname)
 {
 	int ret;
 
-	ret = alloc_chrdev_region(&px4card_dev_first, 0, PX4CARD_CHRDEV_NUM, PX4CARD_DEVNAME);
+	if (!devname)
+		return -EINVAL;
+
+	ret = alloc_chrdev_region(&px4card_dev_first, 0, PX4CARD_CHRDEV_NUM, devname);
 	if (ret) {
 		pr_err("px4_card: alloc_chrdev_region() failed. (ret: %d)\n", ret);
 		return ret;
 	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
-	px4card_class = class_create(PX4CARD_DEVNAME);
+	px4card_class = class_create(devname);
 #else
-	px4card_class = class_create(THIS_MODULE, PX4CARD_DEVNAME);
+	px4card_class = class_create(THIS_MODULE, devname);
 #endif
 	if (IS_ERR(px4card_class)) {
-		pr_err("px4_card: class_create() failed.\n");
+		pr_err("px4_card_init_dev_node: class_create(\"%s\") failed.\n",
+		       devname);
 		ret = PTR_ERR(px4card_class);
 		goto fail_class;
 	}
@@ -473,7 +464,7 @@ int px4_card_register(struct px4_card_context *card_ctx,
 	if (!card_ctx || !dev || !it930x || !owner_kref || !owner_kref_release)
 		return -EINVAL;
 
-	name_prefix = devname ? devname : PX4CARD_DEVNAME;
+	name_prefix = devname ? devname : "px4card";
 
 	/* Find available device ID */
 	mutex_lock(&px4card_lock);

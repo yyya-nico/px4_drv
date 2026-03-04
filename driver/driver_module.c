@@ -14,7 +14,6 @@
 
 #include "revision.h"
 #include "px4_usb.h"
-#include "px4_card.h"
 #include "firmware.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,15,4)
@@ -46,13 +45,8 @@ int init_module(void)
 #endif
 		"\n");
 
-	ret = px4_card_init_dev_node();
-	if (ret)
-		return ret;
-
 	ret = px4_usb_register();
 	if (ret) {
-		px4_card_term_dev_node();
 		return ret;
 	}
 
@@ -66,7 +60,6 @@ void cleanup_module(void)
 #endif
 {
 	px4_usb_unregister();
-	px4_card_term_dev_node();
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,15,4)

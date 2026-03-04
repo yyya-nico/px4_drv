@@ -35,7 +35,7 @@ struct px4_card_context {
 };
 
 /* Device management */
-int px4_card_init_dev_node(void);
+int px4_card_init_dev_node(const char *devname);
 void px4_card_term_dev_node(void);
 
 /* Card device registration/unregistration */

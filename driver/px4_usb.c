@@ -20,6 +20,7 @@
 #include "px4_usb_params.h"
 #include "px4_device_params.h"
 #include "ptx_chrdev.h"
+#include "px4_card.h"
 #include "px4_device.h"
 #include "pxmlt_device.h"
 #include "isdb2056_device.h"
@@ -405,11 +406,23 @@ int px4_usb_register()
 		goto fail;
 	}
 
+	ret = px4_card_init_dev_node("px4card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"px4\") failed.\n");
+		goto fail;
+	}
+
 	ret = ptx_chrdev_context_create("pxmlt5", "pxmlt5video",
 					PXMLT5_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"pxmlt5\") failed.\n");
+		goto fail_mlt5;
+	}
+
+	ret = px4_card_init_dev_node("pxmlt5card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"pxmlt5\") failed.\n");
 		goto fail_mlt5;
 	}
 
@@ -421,11 +434,23 @@ int px4_usb_register()
 		goto fail_mlt8;
 	}
 
+	ret = px4_card_init_dev_node("pxmlt8card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"pxmlt8\") failed.\n");
+		goto fail_mlt8;
+	}
+
 	ret = ptx_chrdev_context_create("isdb2056", "isdb2056video",
 					ISDB2056_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"isdb2056\") failed.\n");
+		goto fail_isdb2056;
+	}
+
+	ret = px4_card_init_dev_node("isdb2056card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"isdb2056\") failed.\n");
 		goto fail_isdb2056;
 	}
 
@@ -437,11 +462,23 @@ int px4_usb_register()
 		goto fail_isdb6014;
 	}
 
+	ret = px4_card_init_dev_node("isdb6014card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"isdb6014\") failed.\n");
+		goto fail_isdb6014;
+	}
+
 	ret = ptx_chrdev_context_create("pxm1ur", "pxm1urvideo",
 					PXM1UR_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"pxm1ur\") failed.\n");
+		goto fail_pxm1ur;
+	}
+
+	ret = px4_card_init_dev_node("pxm1urcard");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"pxm1ur\") failed.\n");
 		goto fail_pxm1ur;
 	}
 
@@ -453,11 +490,23 @@ int px4_usb_register()
 		goto fail_pxs1ur;
 	}
 
+	ret = px4_card_init_dev_node("pxs1urcard");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"pxs1ur\") failed.\n");
+		goto fail_pxs1ur;
+	}
+
 	ret = ptx_chrdev_context_create("isdbt2071", "isdbt2071video",
 					ISDBT2071_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"isdbt2071\") failed.\n");
+		goto fail_isdbt2071;
+	}
+
+	ret = px4_card_init_dev_node("isdbt2071card");
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_init_dev_node(\"isdbt2071\") failed.\n");
 		goto fail_isdbt2071;
 	}
 
@@ -471,27 +520,35 @@ int px4_usb_register()
 
 fail_usb:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_isdbt2071:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_pxs1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_pxm1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_isdb6014:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_isdb2056:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_mlt8:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail_mlt5:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PX4_USB_DEVICE]);
+	px4_card_term_dev_node();
 
 fail:
 	return ret;
