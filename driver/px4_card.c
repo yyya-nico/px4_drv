@@ -118,13 +118,9 @@ static int px4card_fops_open(struct inode *inode, struct file *file)
 
 	kref_get(card_ctx->owner_kref);
 
-	mutex_lock(&card_ctx->lock);
-
 	file->private_data = card_ctx;
 	dev_dbg(card_ctx->dev, "px4card_fops_open: device opened\n");
 
-exit:
-	mutex_unlock(&card_ctx->lock);
 	return 0;
 }
 
