@@ -921,6 +921,7 @@ static int m1ur_device_load_config(struct m1ur_device *m1ur,
 
 int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 			 struct ptx_chrdev_context *chrdev_ctx,
+			 struct px4_card_context_group *card_ctx_group,
 			 struct completion *quit_completion)
 {
 	int ret = 0;
@@ -931,7 +932,7 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct m1ur_stream_context *stream_ctx;
 
-	if (!m1ur || !dev || !chrdev_ctx || !quit_completion)
+	if (!m1ur || !dev || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev, "m1ur_device_init\n");
@@ -941,6 +942,7 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 	kref_init(&m1ur->kref);
 	m1ur->dev = dev;
 	m1ur->quit_completion = quit_completion;
+	m1ur->card_ctx_group = card_ctx_group;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
 	if (!stream_ctx) {
@@ -989,7 +991,7 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 		goto fail_device;
 
 	/* Register smart card device */
-	ret = px4_card_register(&m1ur->card_ctx, dev, "pxm1urcard", it930x,
+	ret = px4_card_register(&m1ur->card_ctx, dev, card_ctx_group, it930x,
 				&m1ur->kref, m1ur_device_release);
 	if (ret) {
 		dev_warn(dev, "m1ur_device_init: failed to register card device. (ret: %d)\n", ret);

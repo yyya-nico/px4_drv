@@ -18,7 +18,20 @@
 #include "it930x.h"
 #include "px4_card_ioctl.h"
 
-/* Card device context */
+/* Card context group - manages device class and region for a group (e.g., px4, pxmlt5) */
+struct px4_card_context_group {
+	struct kref kref;
+	struct mutex lock;
+	char devname[64];
+	struct class *class;
+	dev_t dev_base;
+	unsigned int max_num;
+	unsigned int minor_num;
+	u8 *minor_table;
+	unsigned int last_id;
+};
+
+/* Individual card device context */
 struct px4_card_context {
 	struct mutex lock;
 	atomic_t open;
@@ -30,18 +43,21 @@ struct px4_card_context {
 	struct it930x_bridge *it930x;
 	wait_queue_head_t read_wq;
 	bool card_present;
+	struct px4_card_context_group *parent;
 	struct kref *owner_kref;
 	void (*owner_kref_release)(struct kref *);
 };
 
-/* Device management */
-int px4_card_init_dev_node(const char *devname);
-void px4_card_term_dev_node(void);
+/* Context group management */
+int px4_card_context_create(const char *name, const char *devname,
+			    unsigned int max_num,
+			    struct px4_card_context_group **card_ctx_group);
+void px4_card_context_destroy(struct px4_card_context_group *card_ctx_group);
 
 /* Card device registration/unregistration */
 int px4_card_register(struct px4_card_context *card_ctx,
 		      struct device *dev,
-		      const char *devname,
+		      struct px4_card_context_group *ctx_group,
 		      struct it930x_bridge *it930x,
 		      struct kref *owner_kref,
 		      void (*owner_kref_release)(struct kref *));

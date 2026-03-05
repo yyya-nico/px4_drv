@@ -18,12 +18,27 @@
 #include "px4_card.h"
 #include "it930x.h"
 
-#define PX4CARD_CHRDEV_NUM	16
+#define PX4CARD_MAX_GROUPS	8
 
-static dev_t px4card_dev_first;
-static struct class *px4card_class;
-static DEFINE_MUTEX(px4card_lock);
-static DECLARE_BITMAP(px4card_available, PX4CARD_CHRDEV_NUM);
+/* Helper function: reference counting release callback */
+static void px4_card_context_group_release(struct kref *ref)
+{
+	struct px4_card_context_group *ctx_group;
+
+	ctx_group = container_of(ref, struct px4_card_context_group, kref);
+
+	if (ctx_group->class)
+		class_destroy(ctx_group->class);
+
+	if (ctx_group->dev_base)
+		unregister_chrdev_region(ctx_group->dev_base, ctx_group->max_num);
+
+	if (ctx_group->minor_table)
+		kfree(ctx_group->minor_table);
+
+	pr_info("px4_card: device context group (%s) destroyed\n", ctx_group->devname);
+	kfree(ctx_group);
+}
 
 /* Helper: wait for UART data ready */
 static int px4card_wait_data_ready(struct px4_card_context *card_ctx,
@@ -400,54 +415,83 @@ static const struct file_operations px4card_fops = {
 	.poll = px4card_fops_poll,
 };
 
-/* Initialize device node infrastructure */
-int px4_card_init_dev_node(const char *devname)
+/* Create a card context group - manages device class and region for a group */
+int px4_card_context_create(const char *name, const char *devname,
+			    unsigned int max_num,
+			    struct px4_card_context_group **card_ctx_group)
 {
+	struct px4_card_context_group *ctx_group;
 	int ret;
 
-	if (!devname)
+	if (!name || !devname || !card_ctx_group || max_num == 0)
 		return -EINVAL;
 
-	ret = alloc_chrdev_region(&px4card_dev_first, 0, PX4CARD_CHRDEV_NUM, devname);
+	ctx_group = kzalloc(sizeof(*ctx_group), GFP_KERNEL);
+	if (!ctx_group)
+		return -ENOMEM;
+
+	kref_init(&ctx_group->kref);
+	mutex_init(&ctx_group->lock);
+	strncpy(ctx_group->devname, devname, sizeof(ctx_group->devname) - 1);
+	ctx_group->max_num = max_num;
+
+	/* Allocate minor number table */
+	ctx_group->minor_table = kzalloc(sizeof(u8) * max_num, GFP_KERNEL);
+	if (!ctx_group->minor_table) {
+		ret = -ENOMEM;
+		goto fail_minor_table;
+	}
+	bitmap_fill((unsigned long *)ctx_group->minor_table, max_num);
+	ctx_group->minor_num = max_num;
+
+	/* Allocate character device region */
+	ret = alloc_chrdev_region(&ctx_group->dev_base, 0, max_num, devname);
 	if (ret) {
-		pr_err("px4_card: alloc_chrdev_region() failed. (ret: %d)\n", ret);
-		return ret;
+		pr_err("px4_card_context_create: alloc_chrdev_region(\"%s\") failed. (ret: %d)\n",
+		       devname, ret);
+		goto fail_chrdev;
 	}
 
+	/* Create device class */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
-	px4card_class = class_create(devname);
+	ctx_group->class = class_create(devname);
 #else
-	px4card_class = class_create(THIS_MODULE, devname);
+	ctx_group->class = class_create(THIS_MODULE, devname);
 #endif
-	if (IS_ERR(px4card_class)) {
-		pr_err("px4_card_init_dev_node: class_create(\"%s\") failed.\n",
-		       devname);
-		ret = PTR_ERR(px4card_class);
+	if (IS_ERR(ctx_group->class)) {
+		ret = PTR_ERR(ctx_group->class);
+		pr_err("px4_card_context_create: class_create(\"%s\") failed. (ret: %d)\n",
+		       devname, ret);
 		goto fail_class;
 	}
 
-	bitmap_fill(px4card_available, PX4CARD_CHRDEV_NUM);
+	*card_ctx_group = ctx_group;
 
-	pr_info("px4_card: device node infrastructure initialized\n");
+	pr_info("px4_card: device context group (%s) created\n", devname);
 	return 0;
 
 fail_class:
-	unregister_chrdev_region(px4card_dev_first, PX4CARD_CHRDEV_NUM);
+	unregister_chrdev_region(ctx_group->dev_base, max_num);
+fail_chrdev:
+	kfree(ctx_group->minor_table);
+fail_minor_table:
+	kfree(ctx_group);
 	return ret;
 }
 
-/* Terminate device node infrastructure */
-void px4_card_term_dev_node(void)
+/* Destroy a card context group - decrements reference count */
+void px4_card_context_destroy(struct px4_card_context_group *card_ctx_group)
 {
-	class_destroy(px4card_class);
-	unregister_chrdev_region(px4card_dev_first, PX4CARD_CHRDEV_NUM);
-	pr_info("px4_card: device node infrastructure terminated\n");
+	if (!card_ctx_group)
+		return;
+
+	kref_put(&card_ctx_group->kref, px4_card_context_group_release);
 }
 
-/* Register a card device */
+/* Register a card device within a context group */
 int px4_card_register(struct px4_card_context *card_ctx,
 		      struct device *dev,
-		      const char *devname,
+		      struct px4_card_context_group *ctx_group,
 		      struct it930x_bridge *it930x,
 		      struct kref *owner_kref,
 		      void (*owner_kref_release)(struct kref *))
@@ -455,39 +499,38 @@ int px4_card_register(struct px4_card_context *card_ctx,
 	unsigned int id;
 	dev_t devt;
 	int ret;
-	const char *name_prefix;
 
-	if (!card_ctx || !dev || !it930x || !owner_kref || !owner_kref_release)
+	if (!card_ctx || !dev || !ctx_group || !it930x || !owner_kref || !owner_kref_release)
 		return -EINVAL;
 
-	name_prefix = devname ? devname : "px4card";
-
-	/* Find available device ID */
-	mutex_lock(&px4card_lock);
-	id = find_first_bit(px4card_available, PX4CARD_CHRDEV_NUM);
-	if (id >= PX4CARD_CHRDEV_NUM) {
-		mutex_unlock(&px4card_lock);
-		dev_err(dev, "px4_card_register: no available device ID\n");
+	/* Find available device ID within the group */
+	mutex_lock(&ctx_group->lock);
+	id = find_first_bit((unsigned long *)ctx_group->minor_table, ctx_group->max_num);
+	if (id >= ctx_group->max_num) {
+		mutex_unlock(&ctx_group->lock);
+		dev_err(dev, "px4_card_register: no available device ID in group\n");
 		return -ENOSPC;
 	}
-	clear_bit(id, px4card_available);
-	mutex_unlock(&px4card_lock);
+	clear_bit(id, (unsigned long *)ctx_group->minor_table);
+	kref_get(&ctx_group->kref);	/* Increment context group reference count */
+	mutex_unlock(&ctx_group->lock);
 
 	/* Initialize context */
 	memset(card_ctx, 0, sizeof(*card_ctx));
 	mutex_init(&card_ctx->lock);
 	atomic_set(&card_ctx->open, 0);
 	card_ctx->id = id;
-	snprintf(card_ctx->name, sizeof(card_ctx->name), "%s%u", name_prefix, id);
+	snprintf(card_ctx->name, sizeof(card_ctx->name), "%s%u", ctx_group->devname, id);
 	card_ctx->dev = dev;
 	card_ctx->it930x = it930x;
 	init_waitqueue_head(&card_ctx->read_wq);
 	card_ctx->card_present = false;
+	card_ctx->parent = ctx_group;
 	card_ctx->owner_kref = owner_kref;
 	card_ctx->owner_kref_release = owner_kref_release;
 
 	/* Initialize cdev */
-	devt = MKDEV(MAJOR(px4card_dev_first), MINOR(px4card_dev_first) + id);
+	devt = MKDEV(MAJOR(ctx_group->dev_base), MINOR(ctx_group->dev_base) + id);
 	cdev_init(&card_ctx->cdev, &px4card_fops);
 	card_ctx->cdev.owner = THIS_MODULE;
 
@@ -498,7 +541,7 @@ int px4_card_register(struct px4_card_context *card_ctx,
 	}
 
 	/* Create device node */
-	card_ctx->device = device_create(px4card_class, dev, devt, NULL, card_ctx->name);
+	card_ctx->device = device_create(ctx_group->class, dev, devt, NULL, card_ctx->name);
 	if (IS_ERR(card_ctx->device)) {
 		dev_err(dev, "px4_card_register: device_create() failed.\n");
 		ret = PTR_ERR(card_ctx->device);
@@ -511,24 +554,30 @@ int px4_card_register(struct px4_card_context *card_ctx,
 fail_device:
 	cdev_del(&card_ctx->cdev);
 fail_cdev:
-	mutex_lock(&px4card_lock);
-	set_bit(id, px4card_available);
-	mutex_unlock(&px4card_lock);
+	mutex_lock(&ctx_group->lock);
+	set_bit(id, (unsigned long *)ctx_group->minor_table);
+	kref_put(&ctx_group->kref, px4_card_context_group_release);
+	mutex_unlock(&ctx_group->lock);
 	return ret;
 }
 
 /* Unregister a card device */
 void px4_card_unregister(struct px4_card_context *card_ctx)
 {
+	struct px4_card_context_group *ctx_group;
+
 	if (!card_ctx)
 		return;
 
+	ctx_group = card_ctx->parent;
+
 	dev_info(card_ctx->dev, "px4_card: unregistering /dev/%s\n", card_ctx->name);
 
-	device_destroy(px4card_class, card_ctx->cdev.dev);
+	device_destroy(ctx_group->class, card_ctx->cdev.dev);
 	cdev_del(&card_ctx->cdev);
 
-	mutex_lock(&px4card_lock);
-	set_bit(card_ctx->id, px4card_available);
-	mutex_unlock(&px4card_lock);
+	mutex_lock(&ctx_group->lock);
+	set_bit(card_ctx->id, (unsigned long *)ctx_group->minor_table);
+	kref_put(&ctx_group->kref, px4_card_context_group_release);
+	mutex_unlock(&ctx_group->lock);
 }

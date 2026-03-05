@@ -44,6 +44,7 @@ struct s1ur_device {
 	struct ptx_chrdev_group *chrdev_group;
 	struct s1ur_chrdev chrdevs1ur;
 	struct it930x_bridge it930x;
+	struct px4_card_context_group *card_ctx_group;
 	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
@@ -51,6 +52,7 @@ struct s1ur_device {
 int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 			enum s1ur_model s1ur_model,
 			struct ptx_chrdev_context *chrdev_ctx,
+			struct px4_card_context_group *card_ctx_group,
 			struct completion *quit_completion);
 void s1ur_device_term(struct s1ur_device *s1ur);
 

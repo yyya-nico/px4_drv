@@ -975,6 +975,7 @@ static int isdb2056_device_load_config(struct isdb2056_device *isdb2056,
 int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 			 enum isdb2056_model isdb2056_model,
 			 struct ptx_chrdev_context *chrdev_ctx,
+			 struct px4_card_context_group *card_ctx_group,
 			 struct completion *quit_completion)
 {
 	int ret = 0;
@@ -985,7 +986,7 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct isdb2056_stream_context *stream_ctx;
 
-	if (!isdb2056 || !dev || !chrdev_ctx || !quit_completion)
+	if (!isdb2056 || !dev || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev, "isdb2056_device_init\n");
@@ -994,6 +995,7 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 
 	kref_init(&isdb2056->kref);
 	isdb2056->dev = dev;
+	isdb2056->card_ctx_group = card_ctx_group;
 	isdb2056->isdb2056_model = isdb2056_model;
 	isdb2056->quit_completion = quit_completion;
 
@@ -1044,7 +1046,7 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 		goto fail_device;
 
 	/* Register smart card device */
-	ret = px4_card_register(&isdb2056->card_ctx, dev, "isdb2056card", it930x,
+	ret = px4_card_register(&isdb2056->card_ctx, dev, card_ctx_group, it930x,
 				&isdb2056->kref, isdb2056_device_release);
 	if (ret) {
 		dev_warn(dev, "isdb2056_device_init: failed to register card device. (ret: %d)\n", ret);

@@ -929,6 +929,7 @@ static int pxmlt_device_load_config(struct pxmlt_device *pxmlt,
 int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 		      enum pxmlt_model model,
 		      struct ptx_chrdev_context *chrdev_ctx,
+		      struct px4_card_context_group *card_ctx_group,
 		      struct completion *quit_completion)
 {
 	int ret = 0, i;
@@ -940,7 +941,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct pxmlt_stream_context *stream_ctx;
 
-	if (!pxmlt || !dev || !chrdev_ctx || !quit_completion)
+	if (!pxmlt || !dev || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev, "pxmlt_device_init\n");
@@ -951,6 +952,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	kref_init(&pxmlt->kref);
 	pxmlt->dev = dev;
 	pxmlt->quit_completion = quit_completion;
+	pxmlt->card_ctx_group = card_ctx_group;
 	pxmlt->open_count = 0;
 	pxmlt->lnb_power_count = 0;
 	pxmlt->streaming_count = 0;
@@ -1035,7 +1037,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 
 	/* Register smart card device */
 	if (card_devname[0]) {
-		ret = px4_card_register(&pxmlt->card_ctx, dev, card_devname, it930x,
+		ret = px4_card_register(&pxmlt->card_ctx, dev, card_ctx_group, it930x,
 					&pxmlt->kref, pxmlt_device_release);
 		if (ret) {
 			dev_warn(dev, "pxmlt_device_init: failed to register card device. (ret: %d)\n", ret);

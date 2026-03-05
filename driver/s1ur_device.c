@@ -778,6 +778,7 @@ static int s1ur_device_load_config(struct s1ur_device *s1ur,
 int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 			enum s1ur_model s1ur_model,
 			struct ptx_chrdev_context *chrdev_ctx,
+			struct px4_card_context_group *card_ctx_group,
 			struct completion *quit_completion)
 {
 	int ret = 0;
@@ -789,7 +790,7 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct s1ur_stream_context *stream_ctx;
 
-	if (!s1ur || !dev || !chrdev_ctx || !quit_completion)
+	if (!s1ur || !dev || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev, "s1ur_device_init\n");
@@ -798,6 +799,7 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 
 	kref_init(&s1ur->kref);
 	s1ur->dev = dev;
+	s1ur->card_ctx_group = card_ctx_group;
 	s1ur->s1ur_model = s1ur_model;
 	card_devname = (s1ur_model == ISDBT2071_MODEL) ? "isdbt2071card" : "pxs1urcard";
 	s1ur->quit_completion = quit_completion;
@@ -849,7 +851,7 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 		goto fail_device;
 
 	/* Register smart card device */
-	ret = px4_card_register(&s1ur->card_ctx, dev, card_devname, it930x,
+	ret = px4_card_register(&s1ur->card_ctx, dev, card_ctx_group, it930x,
 				&s1ur->kref, s1ur_device_release);
 	if (ret) {
 		dev_warn(dev, "s1ur_device_init: failed to register card device. (ret: %d)\n", ret);
