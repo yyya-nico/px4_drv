@@ -959,7 +959,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	switch (model) {
 	case PXMLT8PE3_MODEL:
 		pxmlt->chrdevm_num = 3;
-		card_devname = "pxmlt8card";
+		card_devname = "";
 		break;
 
 	case ISDB6014_4TS_MODEL:
@@ -1034,11 +1034,13 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 		goto fail_device;
 
 	/* Register smart card device */
-	ret = px4_card_register(&pxmlt->card_ctx, dev, card_devname, it930x,
-				&pxmlt->kref, pxmlt_device_release);
-	if (ret) {
-		dev_warn(dev, "pxmlt_device_init: failed to register card device. (ret: %d)\n", ret);
-		/* Non-fatal error - continue without card support */
+	if (card_devname[0]) {
+		ret = px4_card_register(&pxmlt->card_ctx, dev, card_devname, it930x,
+					&pxmlt->kref, pxmlt_device_release);
+		if (ret) {
+			dev_warn(dev, "pxmlt_device_init: failed to register card device. (ret: %d)\n", ret);
+			/* Non-fatal error - continue without card support */
+		}
 	}
 
 	/* GPIO */
@@ -1151,7 +1153,9 @@ void pxmlt_device_term(struct pxmlt_device *pxmlt)
 	atomic_xchg(&pxmlt->available, 0);
 	
 	/* Unregister smart card device */
-	px4_card_unregister(&pxmlt->card_ctx);
+	if (pxmlt->card_ctx.dev) {
+		px4_card_unregister(&pxmlt->card_ctx);
+	}
 	
 	ptx_chrdev_group_destroy(pxmlt->chrdev_group);
 

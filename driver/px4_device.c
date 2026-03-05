@@ -1419,8 +1419,10 @@ void px4_device_term(struct px4_device *px4)
 
 	atomic_xchg(&px4->available, 0);
 	
-	/* Unregister smart card device */
-	px4_card_unregister(&px4->card_ctx);
+	if (px4->card_ctx.dev) {
+		/* Unregister smart card device */
+		px4_card_unregister(&px4->card_ctx);
+	}
 	
 	ptx_chrdev_group_destroy(px4->chrdev_group);
 
