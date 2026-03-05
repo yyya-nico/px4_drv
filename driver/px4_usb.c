@@ -520,31 +520,24 @@ int px4_usb_register()
 
 fail_usb:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_isdbt2071:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_pxs1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_pxm1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_isdb6014:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_isdb2056:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_mlt8:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE]);
-	px4_card_term_dev_node();
 
 fail_mlt5:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PX4_USB_DEVICE]);
