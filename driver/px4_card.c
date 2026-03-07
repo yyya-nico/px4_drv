@@ -72,49 +72,29 @@ static int px4card_receive_atr(struct px4_card_context *card_ctx,
 {
 	struct it930x_bridge *it930x = card_ctx->it930x;
 	int ret;
-	bool ready;
-	u8 len;
-	unsigned long start_time;
+	
+	mutex_lock(&card_ctx->lock);
+	ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, &atr->length);
+	mutex_unlock(&card_ctx->lock);
 
-	atr->length = 0;
-	start_time = jiffies;
-
-	/* Wait up to 1 second for ATR (ISO/IEC 7816-3: max 400-40000 clock cycles) */
-	while (atr->length < sizeof(atr->data)) {
-		/* Check if data is ready */
-		ret = it930x_bcas_check_ready(it930x, &ready);
-		if (ret)
-			return ret;
-
-		if (!ready) {
-			if (time_after(jiffies, start_time + HZ)) {
-				/* Timeout */
-				break;
-			}
-			msleep(10);
-			continue;
-		}
-
-		/* Read available data */
-		len = sizeof(atr->data) - atr->length;
-		ret = it930x_bcas_get_data(it930x, &atr->data[atr->length], &len);
-		if (ret)
-			return ret;
-
-		atr->length += len;
-
-		/* Basic ATR validation: need at least TS and T0 */
-		if (atr->length >= 2) {
-			/* Check if we have received the complete ATR
-			 * This is a simplistic check - full parsing should be done in userland
-			 */
-			if (atr->length >= 3)
-				break;
-		}
+	if (ret) {
+		dev_err(card_ctx->dev, "px4card_receive_atr: failed to read RX length. (ret: %d)\n", ret);
+		return ret;
 	}
 
-	if (atr->length < 2)
-		return -ENODATA;
+	if (atr->length == 13) {
+		mutex_lock(&card_ctx->lock);
+		ret = it930x_bcas_get_data(it930x, atr->data, &atr->length);
+		mutex_unlock(&card_ctx->lock);
+	} else {
+		dev_err(card_ctx->dev, "px4card_receive_atr: unexpected ATR length: %u\n", atr->length);
+		return -EINVAL;
+	}
+
+	if (ret) {
+		dev_err(card_ctx->dev, "px4card_receive_atr: failed to read ATR data. (ret: %d)\n", ret);
+		return ret;
+	}
 
 	return 0;
 }
@@ -177,14 +157,6 @@ static ssize_t px4card_fops_read(struct file *file, char __user *buf,
 		count = sizeof(kbuf);
 
 	mutex_lock(&card_ctx->lock);
-
-	/* Wait for data with timeout */
-	ret = px4card_wait_data_ready(card_ctx, &ready, 1000);
-	if (ret) {
-		if (ret == -ETIMEDOUT)
-			ret = -EAGAIN;
-		goto exit;
-	}
 
 	/* Read data from UART */
 	len = count;
