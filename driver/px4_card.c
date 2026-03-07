@@ -48,9 +48,7 @@ static int px4card_receive_atr(struct px4_card_context *card_ctx,
 	u8 val = 0;
 	int ret;
 	
-	mutex_lock(&card_ctx->lock);
 	ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, &val);
-	mutex_unlock(&card_ctx->lock);
 
 	if (ret) {
 		dev_err(card_ctx->dev, "px4card_receive_atr: failed to read RX length. (ret: %d)\n", ret);
@@ -58,9 +56,7 @@ static int px4card_receive_atr(struct px4_card_context *card_ctx,
 	}
 
 	if (val == 13) {
-		mutex_lock(&card_ctx->lock);
 		ret = it930x_bcas_get_data(it930x, atr->data, &atr->length);
-		mutex_unlock(&card_ctx->lock);
 	} else {
 		dev_err(card_ctx->dev, "px4card_receive_atr: unexpected ATR length: %u\n", val);
 		return -EINVAL;
