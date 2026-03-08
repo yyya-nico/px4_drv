@@ -364,6 +364,89 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 
+	case PX4CARD_READ_READY:
+	{
+		int ready = 0;
+		bool data_ready;
+
+		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ_READY\n");
+
+		/* Check if data is ready */
+		ret = it930x_bcas_check_ready(it930x, &data_ready);
+		if (ret) {
+			dev_err(card_ctx->dev, "ioctl: failed to check data ready. (ret: %d)\n", ret);
+			break;
+		}
+
+		ready = data_ready ? 1 : 0;
+
+		/* Copy to user space */
+		if (copy_to_user(argp, &ready, sizeof(ready))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		break;
+	}
+
+	case PX4CARD_READ:
+	{
+		struct px4_card_data data;
+		bool ready;
+
+		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ\n");
+
+		/* Wait for data with timeout */
+		ret = px4card_wait_data_ready(card_ctx, &ready, 1000);
+		if (ret) {
+			if (ret == -ETIMEDOUT)
+				ret = -EAGAIN;
+			break;
+		}
+
+		/* Read data from UART */
+		data.length = sizeof(data.buffer);
+		ret = it930x_bcas_get_data(it930x, data.buffer, &data.length);
+		if (ret) {
+			dev_err(card_ctx->dev, "ioctl: failed to get data. (ret: %d)\n", ret);
+			break;
+		}
+
+		/* Copy to user space */
+		if (copy_to_user(argp, &data, sizeof(data))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = 0;
+
+		break;
+	}
+
+	case PX4CARD_WRITE:
+	{
+		struct px4_card_data data;
+
+		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_WRITE\n");
+
+		/* Copy from user space */
+		if (copy_from_user(&data, argp, sizeof(data))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		/* Send data to UART */
+		ret = it930x_bcas_send_data(it930x, data.buffer, data.length);
+		if (ret) {
+			dev_err(card_ctx->dev, "ioctl: failed to send data. (ret: %d)\n", ret);
+			break;
+		}
+
+		ret = 0;
+
+		break;
+	}
+
 	default:
 		ret = -ENOTTY;
 		break;
