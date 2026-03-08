@@ -1163,6 +1163,11 @@ int it930x_purge_psb(struct it930x_bridge *it930x, int timeout)
 	return ret;
 }
 
+/* UART/Smart Card Register Definitions */
+#define IT930X_REG_UART_RX_READY	0x496a
+#define IT930X_REG_UART_RX_LENGTH	0x496b
+#define IT930X_REG_UART_REALSEND	0x4965
+
 /* UART/Smart Card helper functions */
 int it930x_set_uart_baudrate(struct it930x_bridge *it930x,
 			     enum it930x_uart_baudrate baudrate)
