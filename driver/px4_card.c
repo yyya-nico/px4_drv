@@ -40,6 +40,32 @@ static void px4_card_context_group_release(struct kref *ref)
 	kfree(ctx_group);
 }
 
+/* Helper: wait for UART data ready */
+static int px4card_wait_data_ready(struct px4_card_context *card_ctx,
+				   bool *ready, long timeout_ms)
+{
+	struct it930x_bridge *it930x = card_ctx->it930x;
+	int ret;
+	long timeout = msecs_to_jiffies(timeout_ms);
+	long remaining;
+
+	remaining = wait_event_interruptible_timeout(
+		card_ctx->read_wq,
+		({
+			ret = it930x_bcas_check_ready(it930x, ready);
+			ret == 0 && *ready;
+		}),
+		timeout
+	);
+
+	if (remaining == 0)
+		return -ETIMEDOUT;
+	else if (remaining < 0)
+		return remaining;
+
+	return ret;
+}
+
 /* Helper: receive ATR after card reset */
 static int px4card_receive_atr(struct px4_card_context *card_ctx,
 			       struct px4_card_atr *atr)
