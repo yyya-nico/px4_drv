@@ -890,19 +890,21 @@ int it930x_set_gpio_mode(struct it930x_bridge *it930x,
 
 	mutex_lock(&priv->gpio_lock);
 
-	ret = it930x_write_reg(it930x, gpio_en_regs[gpio], val);
-	if (ret)
+	if (priv->status[gpio].mode == mode)
 		goto exit;
 
 	priv->status[gpio].mode = mode;
 
-	ret = it930x_write_reg(it930x,
-			      gpio_en_regs[gpio] + 1,
-			      enable ? 1 : 0);
+	ret = it930x_write_reg(it930x, gpio_en_regs[gpio], val);
 	if (ret)
 		goto exit;
 
-	priv->status[gpio].enable = enable;
+	if (!enable || priv->status[gpio].enable)
+		goto exit;
+
+	priv->status[gpio].enable = true;
+
+	ret = it930x_write_reg(it930x, gpio_en_regs[gpio] + 1, 1);
 
 exit:
 	mutex_unlock(&priv->gpio_lock);
@@ -1324,9 +1326,8 @@ int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
 int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 {
 	int ret = 0;
-	u8 read_len = 32;
-	u8 temp = 32;
-	u8 index = 0;
+	u8 rx_len, temp, index = 0;
+	u8 read_len;
 	struct it930x_ctrl_buf wb, rb;
 
 	dev_dbg(it930x->dev, "%s\n", __func__);
@@ -1336,7 +1337,9 @@ int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 
 	if (*len > 32) {
 		/* Read in chunks of up to 32 bytes */
-		while (read_len != 0) {
+		rx_len = 32;
+
+		while (rx_len > 0) {
 			ret = it930x_read_reg(it930x,
 					     IT930X_REG_UART_RX_LENGTH,
 					     &temp);
@@ -1376,17 +1379,17 @@ int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 		if (ret)
 			return ret;
 
-		read_len = temp;
-		*len = read_len;
+		rx_len = temp;
+		*len = rx_len;
 
-		if (read_len == 0)
+		if (rx_len == 0)
 			return 0;
 
-		wb.buf = &read_len;
+		wb.buf = &rx_len;
 		wb.len = 1;
 
 		rb.buf = buf;
-		rb.len = read_len;
+		rb.len = rx_len;
 
 		ret = it930x_ctrl_msg(it930x,
 				      IT930X_CMD_UART_READ,
