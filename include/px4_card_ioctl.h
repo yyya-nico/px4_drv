@@ -27,7 +27,7 @@
 /* ATR (Answer To Reset) structure - max 33 bytes per ISO/IEC 7816-3 */
 struct px4_card_atr {
 	unsigned char data[33];
-	unsigned char length;
+	unsigned int length;
 };
 
 /* Baudrate values */
