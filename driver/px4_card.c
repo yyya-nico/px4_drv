@@ -405,7 +405,8 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		/* Read data from UART */
-		data.length = sizeof(data.buffer);
+		/* px4_card_data.length is u8, so cap to 255 to avoid wrapping 256 -> 0 */
+		data.length = sizeof(data.buffer) - 1;
 		ret = it930x_bcas_get_data(it930x, data.buffer, &data.length);
 		if (ret) {
 			dev_err(card_ctx->dev, "ioctl: failed to get data. (ret: %d)\n", ret);

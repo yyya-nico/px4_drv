@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/ioctl.h>
 
 /* PC/SC IFD Handler API headers */
@@ -37,6 +38,13 @@ struct reader_context {
 };
 
 static struct reader_context readers[MAX_READERS];
+
+/* pcscd optional callback for TAG_IFD_STOP_POLLING_THREAD */
+static RESPONSECODE px4_ifd_stop_polling(DWORD Lun)
+{
+	(void)Lun;
+	return IFD_SUCCESS;
+}
 
 /* Helper functions */
 static int get_reader_index(DWORD Lun)
@@ -121,6 +129,7 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 				 PDWORD Length, PUCHAR Value)
 {
 	struct reader_context *ctx = get_reader(Lun);
+	void *stop_polling_cb = (void *)px4_ifd_stop_polling;
 
 	Log1(PCSC_LOG_INFO, "IFDHGetCapabilities");
 
@@ -158,8 +167,24 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 		*Length = 1;
 		break;
 
+	case TAG_IFD_POLLING_THREAD_KILLABLE:
+		if (*Length < 1)
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		*Value = 1; /* pcscd can stop polling thread with pthread_cancel() */
+		*Length = 1;
+		break;
+
+	case TAG_IFD_STOP_POLLING_THREAD:
+		if (*Length < sizeof(stop_polling_cb)) {
+			*Length = sizeof(stop_polling_cb);
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		}
+		memcpy(Value, &stop_polling_cb, sizeof(stop_polling_cb));
+		*Length = sizeof(stop_polling_cb);
+		break;
+
 	default:
-		Log2(PCSC_LOG_ERROR, "Unknown tag: 0x%X", Tag);
+		Log2(PCSC_LOG_DEBUG, "Unknown tag: 0x%X", Tag);
 		return IFD_ERROR_TAG;
 	}
 
@@ -299,20 +324,26 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	unsigned int elapsed_ms = 0;
 	const unsigned int timeout_ms = 5000;
 	const unsigned int poll_interval_ms = 10;
+	DWORD rx_capacity;
 	int ret;
 
 	Log1(PCSC_LOG_INFO, "IFDHTransmitToICC");
 	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
 	(void)SendPci;
 
-	if (!ctx || ctx->fd < 0)
+	if (!ctx || ctx->fd < 0) {
+		if (RxLength)
+			*RxLength = 0;
 		return IFD_COMMUNICATION_ERROR;
+	}
 
 	if (!TxBuffer || !RxBuffer || !RxLength)
 		return IFD_COMMUNICATION_ERROR;
 
-	if (TxLength == 0 || TxLength > sizeof(tx_data.buffer) ||
-	    *RxLength > sizeof(rx_data.buffer))
+	rx_capacity = *RxLength;
+	*RxLength = 0;
+
+	if (TxLength == 0 || TxLength > UCHAR_MAX || TxLength > sizeof(tx_data.buffer))
 		return IFD_COMMUNICATION_ERROR;
 
 	/* Send APDU to the driver via ioctl */
@@ -358,7 +389,7 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	if (*RxLength < rx_data.length) {
+	if (rx_capacity < rx_data.length) {
 		*RxLength = rx_data.length;
 		return IFD_ERROR_INSUFFICIENT_BUFFER;
 	}
