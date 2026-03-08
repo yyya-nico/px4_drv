@@ -159,7 +159,7 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 		break;
 
 	default:
-		Log1(PCSC_LOG_ERROR, "Unknown tag");
+		Log2(PCSC_LOG_ERROR, "Unknown tag: 0x%X", Tag);
 		return IFD_ERROR_TAG;
 	}
 
@@ -196,8 +196,15 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 	ctx->protocol = Protocol;
 
 	/* PX4 B-CAS cards typically use T=1 protocol */
-	if (Protocol != SCARD_PROTOCOL_T0 && Protocol != SCARD_PROTOCOL_T1) {
-		Log1(PCSC_LOG_ERROR, "Unsupported protocol");
+	switch(Protocol) {
+	case SCARD_PROTOCOL_T0:
+		Log1(PCSC_LOG_INFO, "Protocol set to T=0");
+		break;
+	case SCARD_PROTOCOL_T1:
+		Log1(PCSC_LOG_INFO, "Protocol set to T=1");
+		break;
+	default:
+		Log2(PCSC_LOG_ERROR, "Unsupported protocol: 0x%X", Protocol);
 		return IFD_PROTOCOL_NOT_SUPPORTED;
 	}
 
@@ -223,6 +230,10 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 	switch (Action) {
 	case IFD_POWER_UP:
 	case IFD_RESET:
+		if (Action == IFD_POWER_UP)
+			Log1(PCSC_LOG_INFO, "action: PowerUp");
+		else
+			Log1(PCSC_LOG_INFO, "action: Reset");
 		/* Reset card */
 		ret = ioctl(ctx->fd, PX4CARD_RESET);
 		if (ret < 0) {
@@ -261,11 +272,11 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 
 	case IFD_POWER_DOWN:
 		/* PX4 doesn't support explicit power down */
-		Log1(PCSC_LOG_INFO, "Power down not supported (ignored)");
+		Log1(PCSC_LOG_INFO, "'action: PowerDown' not supported (ignored)");
 		break;
 
 	default:
-			Log1(PCSC_LOG_ERROR, "Unknown power action");
+		Log2(PCSC_LOG_ERROR, "Unknown power action: 0x%X", Action);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -396,7 +407,7 @@ RESPONSECODE IFDHICCPresence(DWORD Lun)
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	Log1(PCSC_LOG_DEBUG, "Card presence check");
+	// Log1(PCSC_LOG_DEBUG, "Card presence check");
 
 	return detected ? IFD_ICC_PRESENT : IFD_ICC_NOT_PRESENT;
 }
