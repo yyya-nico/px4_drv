@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/ioctl.h>
-#include <sys/select.h>
 
 /* PC/SC IFD Handler API headers */
 #include <PCSC/ifdhandler.h>
@@ -283,57 +282,78 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 			       PSCARD_IO_HEADER RecvPci)
 {
 	struct reader_context *ctx = get_reader(Lun);
-	ssize_t sent, received;
-	fd_set readfds;
-	struct timeval timeout;
+	struct px4_card_data tx_data;
+	struct px4_card_data rx_data;
+	int ready = 0;
+	unsigned int elapsed_ms = 0;
+	const unsigned int timeout_ms = 5000;
+	const unsigned int poll_interval_ms = 10;
 	int ret;
 
 	Log1(PCSC_LOG_INFO, "IFDHTransmitToICC");
 	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
+	(void)SendPci;
 
 	if (!ctx || ctx->fd < 0)
 		return IFD_COMMUNICATION_ERROR;
 
-	if (TxLength > MAX_BUFFER_SIZE || *RxLength > MAX_BUFFER_SIZE)
+	if (!TxBuffer || !RxBuffer || !RxLength)
 		return IFD_COMMUNICATION_ERROR;
 
-	/* Send data */
-	sent = write(ctx->fd, TxBuffer, TxLength);
-	if (sent < 0) {
-		Log1(PCSC_LOG_ERROR, "Write failed");
+	if (TxLength == 0 || TxLength > sizeof(tx_data.buffer) ||
+	    *RxLength > sizeof(rx_data.buffer))
 		return IFD_COMMUNICATION_ERROR;
-	}
 
-	if ((size_t)sent != TxLength) {
-		Log1(PCSC_LOG_ERROR, "Partial write");
-		return IFD_COMMUNICATION_ERROR;
-	}
+	/* Send APDU to the driver via ioctl */
+	memset(&tx_data, 0, sizeof(tx_data));
+	memcpy(tx_data.buffer, TxBuffer, TxLength);
+	tx_data.length = (unsigned char)TxLength;
 
-	/* Wait for response with timeout (5 seconds) */
-	FD_ZERO(&readfds);
-	FD_SET(ctx->fd, &readfds);
-	timeout.tv_sec = 5;
-	timeout.tv_usec = 0;
-
-	ret = select(ctx->fd + 1, &readfds, NULL, NULL, &timeout);
+	ret = ioctl(ctx->fd, PX4CARD_WRITE, &tx_data);
 	if (ret < 0) {
-		Log1(PCSC_LOG_ERROR, "Select failed");
+		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	if (ret == 0) {
+	/* Poll readiness and keep prior 5-second timeout behavior */
+	while (elapsed_ms < timeout_ms) {
+		ready = 0;
+		ret = ioctl(ctx->fd, PX4CARD_READ_READY, &ready);
+		if (ret < 0) {
+			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s", strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+
+		if (ready)
+			break;
+
+		usleep(poll_interval_ms * 1000);
+		elapsed_ms += poll_interval_ms;
+	}
+
+	if (!ready) {
 		Log1(PCSC_LOG_ERROR, "Read timeout");
 		return IFD_RESPONSE_TIMEOUT;
 	}
 
-	/* Receive response */
-	received = read(ctx->fd, RxBuffer, *RxLength);
-	if (received < 0) {
-		Log1(PCSC_LOG_ERROR, "Read failed");
+	/* Read APDU response */
+	memset(&rx_data, 0, sizeof(rx_data));
+	ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
+	if (ret < 0) {
+		if (errno == EAGAIN)
+			return IFD_RESPONSE_TIMEOUT;
+
+		Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	*RxLength = received;
+	if (*RxLength < rx_data.length) {
+		*RxLength = rx_data.length;
+		return IFD_ERROR_INSUFFICIENT_BUFFER;
+	}
+
+	memcpy(RxBuffer, rx_data.buffer, rx_data.length);
+	*RxLength = rx_data.length;
 
 	Log1(PCSC_LOG_INFO, "RX completed");
 	LogXxd(PCSC_LOG_INFO, "RX:", RxBuffer, *RxLength);
