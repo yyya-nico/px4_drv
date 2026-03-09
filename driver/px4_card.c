@@ -18,8 +18,6 @@
 #include "px4_card.h"
 #include "it930x.h"
 
-#define PX4CARD_MAX_GROUPS	8
-
 /* Helper function: reference counting release callback */
 static void px4_card_context_group_release(struct kref *ref)
 {
@@ -46,24 +44,23 @@ static int px4card_wait_data_ready(struct px4_card_context *card_ctx,
 {
 	struct it930x_bridge *it930x = card_ctx->it930x;
 	int ret;
-	long timeout = msecs_to_jiffies(timeout_ms);
-	long remaining;
+	unsigned long timeout_jiffies = msecs_to_jiffies(timeout_ms);
+	unsigned long start_time = jiffies;
 
-	remaining = wait_event_interruptible_timeout(
-		card_ctx->read_wq,
-		({
-			ret = it930x_bcas_check_ready(it930x, ready);
-			ret == 0 && *ready;
-		}),
-		timeout
-	);
+	*ready = false;
 
-	if (remaining == 0)
-		return -ETIMEDOUT;
-	else if (remaining < 0)
-		return remaining;
+	while (time_before(jiffies, start_time + timeout_jiffies)) {
+		ret = it930x_bcas_check_ready(it930x, ready);
+		if (ret)
+			return ret;
 
-	return ret;
+		if (*ready)
+			return 0;
+
+		msleep(10);
+	}
+
+	return -ETIMEDOUT;
 }
 
 /* Helper: receive ATR after card reset */
@@ -364,31 +361,6 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 
-	case PX4CARD_READ_READY:
-	{
-		int ready = 0;
-		bool data_ready;
-
-		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ_READY\n");
-
-		/* Check if data is ready */
-		ret = it930x_bcas_check_ready(it930x, &data_ready);
-		if (ret) {
-			dev_err(card_ctx->dev, "ioctl: failed to check data ready. (ret: %d)\n", ret);
-			break;
-		}
-
-		ready = data_ready ? 1 : 0;
-
-		/* Copy to user space */
-		if (copy_to_user(argp, &ready, sizeof(ready))) {
-			ret = -EFAULT;
-			break;
-		}
-
-		break;
-	}
-
 	case PX4CARD_READ:
 	{
 		struct px4_card_data data;
@@ -405,7 +377,6 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		/* Read data from UART */
-		/* px4_card_data.length is u8, so cap to 255 to avoid wrapping 256 -> 0 */
 		data.length = sizeof(data.buffer) - 1;
 		ret = it930x_bcas_get_data(it930x, data.buffer, &data.length);
 		if (ret) {
