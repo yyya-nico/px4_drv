@@ -154,6 +154,93 @@ static int px4card_fops_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/* File operations: read */
+static ssize_t px4card_fops_read(struct file *file, char __user *buf,
+				 size_t count, loff_t *ppos)
+{
+	struct px4_card_context *card_ctx = file->private_data;
+	struct it930x_bridge *it930x;
+	u8 kbuf[256];
+	u8 len;
+	int ret;
+	bool ready;
+
+	if (!card_ctx)
+		return -EINVAL;
+
+	it930x = card_ctx->it930x;
+
+	if (count > sizeof(kbuf))
+		count = sizeof(kbuf);
+
+	mutex_lock(&card_ctx->lock);
+
+	/* Wait for data with timeout */
+	ret = px4card_wait_data_ready(card_ctx, &ready, 1000);
+	if (ret) {
+		if (ret == -ETIMEDOUT)
+			ret = -EAGAIN;
+		goto exit;
+	}
+
+	/* Read data from UART */
+	len = count;
+	ret = it930x_bcas_get_data(it930x, kbuf, &len);
+	if (ret) {
+		dev_err(card_ctx->dev, "px4card_fops_read: failed to get data. (ret: %d)\n", ret);
+		goto exit;
+	}
+
+	/* Copy to user space */
+	if (copy_to_user(buf, kbuf, len)) {
+		ret = -EFAULT;
+		goto exit;
+	}
+
+	ret = len;
+
+exit:
+	mutex_unlock(&card_ctx->lock);
+	return ret;
+}
+
+/* File operations: write */
+static ssize_t px4card_fops_write(struct file *file, const char __user *buf,
+				  size_t count, loff_t *ppos)
+{
+	struct px4_card_context *card_ctx = file->private_data;
+	struct it930x_bridge *it930x;
+	u8 kbuf[256];
+	int ret;
+
+	if (!card_ctx)
+		return -EINVAL;
+
+	it930x = card_ctx->it930x;
+
+	if (count > sizeof(kbuf))
+		return -EINVAL;
+
+	/* Copy from user space */
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	mutex_lock(&card_ctx->lock);
+
+	/* Send data to UART */
+	ret = it930x_bcas_send_data(it930x, kbuf, count);
+	if (ret) {
+		dev_err(card_ctx->dev, "px4card_fops_write: failed to send data. (ret: %d)\n", ret);
+		goto exit;
+	}
+
+	ret = count;
+
+exit:
+	mutex_unlock(&card_ctx->lock);
+	return ret;
+}
+
 /* File operations: ioctl */
 static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long arg)
@@ -341,11 +428,46 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
+/* File operations: poll */
+static unsigned int px4card_fops_poll(struct file *file,
+				      struct poll_table_struct *wait)
+{
+	struct px4_card_context *card_ctx = file->private_data;
+	struct it930x_bridge *it930x;
+	unsigned int mask = 0;
+	bool ready = false;
+	int ret;
+
+	if (!card_ctx)
+		return POLLERR;
+
+	it930x = card_ctx->it930x;
+
+	poll_wait(file, &card_ctx->read_wq, wait);
+
+	mutex_lock(&card_ctx->lock);
+
+	/* Check if data is available */
+	ret = it930x_bcas_check_ready(it930x, &ready);
+	if (!ret && ready)
+		mask |= POLLIN | POLLRDNORM;
+
+	/* Always writable (for now) */
+	mask |= POLLOUT | POLLWRNORM;
+
+	mutex_unlock(&card_ctx->lock);
+
+	return mask;
+}
+
 static const struct file_operations px4card_fops = {
 	.owner = THIS_MODULE,
 	.open = px4card_fops_open,
 	.release = px4card_fops_release,
+	.read = px4card_fops_read,
+	.write = px4card_fops_write,
 	.unlocked_ioctl = px4card_fops_ioctl,
+	.poll = px4card_fops_poll,
 };
 
 /* Create a card context group - manages device class and region for a group */
