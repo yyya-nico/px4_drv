@@ -26,6 +26,8 @@
 
 #define MAX_READERS 16
 #define MAX_ATR_SIZE 33
+#define DEFAULT_T1_IFSC 32
+#define RX_ZERO_LENGTH_RETRY_MAX 3
 /* MAX_BUFFER_SIZE is defined in pcsclite.h as 264 */
 
 /* Reader context */
@@ -35,6 +37,7 @@ struct reader_context {
 	unsigned char atr[MAX_ATR_SIZE];
 	unsigned int atr_len;
 	int protocol;
+	unsigned int t1_ifsc;
 };
 
 static struct reader_context readers[MAX_READERS];
@@ -60,14 +63,154 @@ static struct reader_context *get_reader(DWORD Lun)
 	return &readers[idx];
 }
 
+/* Extract IFSC from ATR TA3 when T=1 parameters are present. */
+static unsigned int px4_ifd_parse_t1_ifsc(const unsigned char *atr,
+					  unsigned int atr_len)
+{
+	unsigned int idx;
+	unsigned int iface_idx;
+	unsigned int y;
+	unsigned int protocol_for_set;
+
+	if (!atr || atr_len < 2)
+		return DEFAULT_T1_IFSC;
+
+	idx = 1;
+	iface_idx = 1;
+	y = (atr[idx] >> 4) & 0x0F;
+	protocol_for_set = 0; /* T=0 by default for first interface set */
+
+	while (1) {
+		if (y & 0x1) { /* TAi */
+			idx++;
+			if (idx >= atr_len)
+				break;
+
+			if (iface_idx == 3 && protocol_for_set == 1 && atr[idx] != 0)
+				return atr[idx];
+		}
+
+		if (y & 0x2) { /* TBi */
+			idx++;
+			if (idx >= atr_len)
+				break;
+		}
+
+		if (y & 0x4) { /* TCi */
+			idx++;
+			if (idx >= atr_len)
+				break;
+		}
+
+		if (y & 0x8) { /* TDi */
+			idx++;
+			if (idx >= atr_len)
+				break;
+
+			y = (atr[idx] >> 4) & 0x0F;
+			protocol_for_set = atr[idx] & 0x0F;
+			iface_idx++;
+			continue;
+		}
+
+		break;
+	}
+
+	return DEFAULT_T1_IFSC;
+}
+
+/* Read response with retries to avoid treating transient 0-byte reads as success. */
+static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
+					  PUCHAR RxBuffer,
+					  PDWORD RxLength)
+{
+	struct px4_card_data rx_data;
+	DWORD rx_capacity;
+	DWORD total_len = 0;
+	DWORD t1_frame_len = 0;
+	int zero_length_retries = 0;
+	int ret;
+
+	if (!ctx || !RxBuffer || !RxLength)
+		return IFD_COMMUNICATION_ERROR;
+
+	rx_capacity = *RxLength;
+	*RxLength = 0;
+
+	if (rx_capacity == 0)
+		return IFD_ERROR_INSUFFICIENT_BUFFER;
+
+	while (1) {
+		memset(&rx_data, 0, sizeof(rx_data));
+		ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
+		if (ret < 0) {
+			if (errno == EAGAIN) {
+				if (total_len > 0)
+					break;
+				return IFD_RESPONSE_TIMEOUT;
+			}
+
+			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s", strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+
+		if (rx_data.length == 0) {
+			if (total_len > 0)
+				break;
+
+			zero_length_retries++;
+			if (zero_length_retries >= RX_ZERO_LENGTH_RETRY_MAX)
+				return IFD_RESPONSE_TIMEOUT;
+
+			usleep(5000);
+			continue;
+		}
+
+		zero_length_retries = 0;
+
+		if (total_len + rx_data.length > rx_capacity) {
+			*RxLength = total_len + rx_data.length;
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		}
+
+		memcpy(RxBuffer + total_len, rx_data.buffer, rx_data.length);
+		total_len += rx_data.length;
+
+		if (ctx->protocol != SCARD_PROTOCOL_T1)
+			break;
+
+		if (t1_frame_len == 0 && total_len >= 3) {
+			t1_frame_len = (DWORD)RxBuffer[2] + 4; /* NAD + PCB + LEN + EDC(1) */
+			if (t1_frame_len > rx_capacity) {
+				*RxLength = t1_frame_len;
+				return IFD_ERROR_INSUFFICIENT_BUFFER;
+			}
+		}
+
+		if (t1_frame_len > 0 && total_len >= t1_frame_len)
+			break;
+	}
+
+	if (ctx->protocol == SCARD_PROTOCOL_T1 && t1_frame_len > 0 && total_len < t1_frame_len)
+		return IFD_RESPONSE_TIMEOUT;
+
+	if (total_len == 0)
+		return IFD_RESPONSE_TIMEOUT;
+
+	*RxLength = total_len;
+	return IFD_SUCCESS;
+}
+
 /*
  * IFDHCreateChannel
  * Opens a communication channel to the device
  */
 RESPONSECODE IFDHCreateChannel(DWORD Lun, DWORD Channel)
 {
-    Log1(PCSC_LOG_ERROR, "IFDHCreateChannel: Use IFDHCreateChannelByName instead");
-    return IFD_COMMUNICATION_ERROR;
+	(void)Lun;
+	(void)Channel;
+	Log1(PCSC_LOG_ERROR, "IFDHCreateChannel: Use IFDHCreateChannelByName instead");
+	return IFD_COMMUNICATION_ERROR;
 }
 
 /*
@@ -88,6 +231,8 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 
 	ctx = &readers[idx];
 	memset(ctx, 0, sizeof(*ctx));
+	ctx->fd = -1;
+	ctx->t1_ifsc = DEFAULT_T1_IFSC;
 
 	/* Open device */
 	ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
@@ -117,6 +262,9 @@ RESPONSECODE IFDHCloseChannel(DWORD Lun)
 
 	close(ctx->fd);
 	ctx->fd = -1;
+	ctx->atr_len = 0;
+	ctx->protocol = 0;
+	ctx->t1_ifsc = DEFAULT_T1_IFSC;
 
 	return IFD_SUCCESS;
 }
@@ -198,6 +346,10 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 RESPONSECODE IFDHSetCapabilities(DWORD Lun, DWORD Tag,
 				 DWORD Length, PUCHAR Value)
 {
+	(void)Lun;
+	(void)Tag;
+	(void)Length;
+	(void)Value;
 	Log1(PCSC_LOG_INFO, "IFDHSetCapabilities (not supported)");
 	return IFD_NOT_SUPPORTED;
 }
@@ -211,6 +363,10 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 				       UCHAR PTS2, UCHAR PTS3)
 {
 	struct reader_context *ctx = get_reader(Lun);
+	(void)Flags;
+	(void)PTS1;
+	(void)PTS2;
+	(void)PTS3;
 
 	Log1(PCSC_LOG_INFO, "IFDHSetProtocolParameters");
 
@@ -223,10 +379,12 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 	/* PX4 B-CAS cards typically use T=1 protocol */
 	switch(Protocol) {
 	case SCARD_PROTOCOL_T0:
+		ctx->t1_ifsc = DEFAULT_T1_IFSC;
 		Log1(PCSC_LOG_INFO, "Protocol set to T=0");
 		break;
 	case SCARD_PROTOCOL_T1:
-		Log1(PCSC_LOG_INFO, "Protocol set to T=1");
+		ctx->t1_ifsc = px4_ifd_parse_t1_ifsc(ctx->atr, ctx->atr_len);
+		Log2(PCSC_LOG_INFO, "Protocol set to T=1, IFSC=%u", ctx->t1_ifsc);
 		break;
 	default:
 		Log2(PCSC_LOG_ERROR, "Unsupported protocol: 0x%X", Protocol);
@@ -281,6 +439,7 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Store ATR */
 		memcpy(ctx->atr, atr_data.data, atr_data.length);
 		ctx->atr_len = atr_data.length;
+		ctx->t1_ifsc = px4_ifd_parse_t1_ifsc(ctx->atr, ctx->atr_len);
 
 		/* Return ATR to caller */
 		if (*AtrLength < atr_data.length) {
@@ -293,6 +452,7 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 
 		Log1(PCSC_LOG_INFO, "ATR received");
 		LogXxd(PCSC_LOG_INFO, "ATR:", Atr, *AtrLength);
+		Log2(PCSC_LOG_INFO, "Derived IFSC from ATR: %u", ctx->t1_ifsc);
 		break;
 
 	case IFD_POWER_DOWN:
@@ -319,13 +479,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 {
 	struct reader_context *ctx = get_reader(Lun);
 	struct px4_card_data tx_data;
-	struct px4_card_data rx_data;
 	DWORD rx_capacity;
 	int ret;
 
 	Log1(PCSC_LOG_INFO, "IFDHTransmitToICC");
 	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
-	(void)SendPci;
+	if (SendPci.Protocol == SCARD_PROTOCOL_T0 || SendPci.Protocol == SCARD_PROTOCOL_T1)
+		ctx->protocol = SendPci.Protocol;
 
 	if (!ctx || ctx->fd < 0) {
 		if (RxLength)
@@ -337,10 +497,12 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		return IFD_COMMUNICATION_ERROR;
 
 	rx_capacity = *RxLength;
-	*RxLength = 0;
 
 	if (TxLength == 0 || TxLength > UCHAR_MAX || TxLength > sizeof(tx_data.buffer))
 		return IFD_COMMUNICATION_ERROR;
+
+	if (ctx->protocol == SCARD_PROTOCOL_T1 && TxLength > (DWORD)(ctx->t1_ifsc + 4))
+		Log2(PCSC_LOG_DEBUG, "T=1 TX may require chaining, length=%u", TxLength);
 
 	/* Send APDU to the driver via ioctl */
 	memset(&tx_data, 0, sizeof(tx_data));
@@ -353,30 +515,18 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	/* Read APDU response */
-	memset(&rx_data, 0, sizeof(rx_data));
-	ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
-	if (ret < 0) {
-		if (errno == EAGAIN)
-			return IFD_RESPONSE_TIMEOUT;
-
-		Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s", strerror(errno));
-		return IFD_COMMUNICATION_ERROR;
-	}
-
-	if (rx_capacity < rx_data.length) {
-		*RxLength = rx_data.length;
-		return IFD_ERROR_INSUFFICIENT_BUFFER;
-	}
-
-	memcpy(RxBuffer, rx_data.buffer, rx_data.length);
-	*RxLength = rx_data.length;
+	*RxLength = rx_capacity;
+	ret = px4_ifd_read_response(ctx, RxBuffer, RxLength);
+	if (ret != IFD_SUCCESS)
+		return ret;
 
 	Log1(PCSC_LOG_INFO, "RX completed");
 	LogXxd(PCSC_LOG_INFO, "RX:", RxBuffer, *RxLength);
 
-	if (RecvPci)
+	if (RecvPci) {
 		RecvPci->Protocol = ctx->protocol;
+		RecvPci->Length = sizeof(*RecvPci);
+	}
 
 	return IFD_SUCCESS;
 }
@@ -390,6 +540,14 @@ RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 			 PUCHAR RxBuffer, DWORD RxLength,
 			 LPDWORD pdwBytesReturned)
 {
+	(void)Lun;
+	(void)dwControlCode;
+	(void)TxBuffer;
+	(void)TxLength;
+	(void)RxBuffer;
+	(void)RxLength;
+	if (pdwBytesReturned)
+		*pdwBytesReturned = 0;
 	Log1(PCSC_LOG_INFO, "IFDHControl (not supported)");
 	return IFD_ERROR_NOT_SUPPORTED;
 }
