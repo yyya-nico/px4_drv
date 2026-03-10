@@ -1324,6 +1324,7 @@ int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
 		return ret;
 
 	*ready = (val != 0);
+	dev_dbg(it930x->dev, "px4card_wait_data_ready: ready=%d\n", *ready);
 
 	return 0;
 }
