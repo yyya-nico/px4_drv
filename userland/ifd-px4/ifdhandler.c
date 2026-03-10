@@ -320,10 +320,6 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	struct reader_context *ctx = get_reader(Lun);
 	struct px4_card_data tx_data;
 	struct px4_card_data rx_data;
-	int ready = 0;
-	unsigned int elapsed_ms = 0;
-	const unsigned int timeout_ms = 5000;
-	const unsigned int poll_interval_ms = 10;
 	DWORD rx_capacity;
 	int ret;
 
@@ -355,27 +351,6 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	if (ret < 0) {
 		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
-	}
-
-	/* Poll readiness and keep prior 5-second timeout behavior */
-	while (elapsed_ms < timeout_ms) {
-		ready = 0;
-		ret = ioctl(ctx->fd, PX4CARD_READ_READY, &ready);
-		if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s", strerror(errno));
-			return IFD_COMMUNICATION_ERROR;
-		}
-
-		if (ready)
-			break;
-
-		usleep(poll_interval_ms * 1000);
-		elapsed_ms += poll_interval_ms;
-	}
-
-	if (!ready) {
-		Log1(PCSC_LOG_ERROR, "Read timeout");
-		return IFD_RESPONSE_TIMEOUT;
 	}
 
 	/* Read APDU response */
