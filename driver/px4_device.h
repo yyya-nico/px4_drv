@@ -21,6 +21,7 @@
 #include "tc90522.h"
 #include "r850.h"
 #include "rt710.h"
+#include "px4_card.h"
 
 #define PX4_CHRDEV_NUM			4
 
@@ -56,12 +57,15 @@ struct px4_device {
 	struct ptx_chrdev_group *chrdev_group;
 	struct px4_chrdev chrdev4[PX4_CHRDEV_NUM];
 	struct it930x_bridge it930x;
+	struct px4_card_context_group *card_ctx_group;
+	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
 
 int px4_device_init(struct px4_device *px4, struct device *dev,
 		    const char *dev_serial, bool use_mldev,
 		    struct ptx_chrdev_context *chrdev_ctx,
+		    struct px4_card_context_group *card_ctx_group,
 		    struct completion *quit_completion);
 void px4_device_term(struct px4_device *px4);
 

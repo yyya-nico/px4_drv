@@ -778,9 +778,11 @@ static int s1ur_device_load_config(struct s1ur_device *s1ur,
 int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 			enum s1ur_model s1ur_model,
 			struct ptx_chrdev_context *chrdev_ctx,
+			struct px4_card_context_group *card_ctx_group,
 			struct completion *quit_completion)
 {
 	int ret = 0;
+	const char *card_devname;
 	struct it930x_bridge *it930x;
 	struct itedtv_bus *bus;
 	struct ptx_chrdev_config chrdev_config;
@@ -788,7 +790,7 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct s1ur_stream_context *stream_ctx;
 
-	if (!s1ur || !dev || !chrdev_ctx || !quit_completion)
+	if (!s1ur || !dev || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev, "s1ur_device_init\n");
@@ -797,7 +799,9 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 
 	kref_init(&s1ur->kref);
 	s1ur->dev = dev;
+	s1ur->card_ctx_group = card_ctx_group;
 	s1ur->s1ur_model = s1ur_model;
+	card_devname = (s1ur_model == ISDBT2071_MODEL) ? "isdbt2071card" : "pxs1urcard";
 	s1ur->quit_completion = quit_completion;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
@@ -841,6 +845,18 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 	ret = it930x_init_warm(it930x);
 	if (ret)
 		goto fail_device;
+
+	ret = it930x_bcas_init(it930x);
+	if (ret)
+		goto fail_device;
+
+	/* Register smart card device */
+	ret = px4_card_register(&s1ur->card_ctx, dev, card_ctx_group, it930x,
+				&s1ur->kref, s1ur_device_release);
+	if (ret) {
+		dev_warn(dev, "s1ur_device_init: failed to register card device. (ret: %d)\n", ret);
+		/* Non-fatal error - continue without card support */
+	}
 
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 3, IT930X_GPIO_OUT, true);
@@ -931,6 +947,10 @@ void s1ur_device_term(struct s1ur_device *s1ur)
 		kref_read(&s1ur->kref));
 
 	atomic_xchg(&s1ur->available, 0);
+	
+	/* Unregister smart card device */
+	px4_card_unregister(&s1ur->card_ctx);
+	
 	ptx_chrdev_group_destroy(s1ur->chrdev_group);
 
 	kref_put(&s1ur->kref, s1ur_device_release);

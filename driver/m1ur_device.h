@@ -19,6 +19,7 @@
 #include "tc90522.h"
 #include "r850.h"
 #include "rt710.h"
+#include "px4_card.h"
 
 #define M1UR_CHRDEV_NUM	1
 
@@ -38,11 +39,14 @@ struct m1ur_device {
 	struct ptx_chrdev_group *chrdev_group;
 	struct m1ur_chrdev chrdevm1ur;
 	struct it930x_bridge it930x;
+	struct px4_card_context_group *card_ctx_group;
+	struct px4_card_context card_ctx;
 	void *stream_ctx;
 };
 
 int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 			 struct ptx_chrdev_context *chrdev_ctx,
+			 struct px4_card_context_group *card_ctx_group,
 			 struct completion *quit_completion);
 void m1ur_device_term(struct m1ur_device *m1ur);
 

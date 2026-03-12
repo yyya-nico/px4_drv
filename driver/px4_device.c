@@ -1170,6 +1170,7 @@ static int px4_device_load_config(struct px4_device *px4,
 int px4_device_init(struct px4_device *px4, struct device *dev,
 		    const char *dev_serial, bool use_mldev,
 		    struct ptx_chrdev_context *chrdev_ctx,
+		    struct px4_card_context_group *card_ctx_group,
 		    struct completion *quit_completion)
 {
 	int ret = 0, i;
@@ -1180,7 +1181,7 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 	struct ptx_chrdev_group *chrdev_group;
 	struct px4_stream_context *stream_ctx;
 
-	if (!px4 || !dev || !dev_serial || !chrdev_ctx || !quit_completion)
+	if (!px4 || !dev || !dev_serial || !chrdev_ctx || !card_ctx_group || !quit_completion)
 		return -EINVAL;
 
 	dev_dbg(dev,
@@ -1197,6 +1198,7 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 	px4->open_count = 0;
 	px4->lnb_power_count = 0;
 	px4->streaming_count = 0;
+	px4->card_ctx_group = card_ctx_group;
 
 	for (i = 0; i < PX4_CHRDEV_NUM; i++) {
 		struct px4_chrdev *chrdev4 = &px4->chrdev4[i];
@@ -1283,6 +1285,18 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 	ret = it930x_init_warm(it930x);
 	if (ret)
 		goto fail_device;
+
+	ret = it930x_bcas_init(it930x);
+	if (ret)
+		goto fail_device;
+
+	/* Register smart card device */
+	ret = px4_card_register(&px4->card_ctx, dev, card_ctx_group, it930x,
+				&px4->kref, px4_device_release);
+	if (ret) {
+		dev_warn(dev, "px4_device_init: failed to register card device. (ret: %d)\n", ret);
+		/* Non-fatal error - continue without card support */
+	}
 
 	/* GPIO */
 	ret = it930x_set_gpio_mode(it930x, 7, IT930X_GPIO_OUT, true);
@@ -1406,6 +1420,12 @@ void px4_device_term(struct px4_device *px4)
 		"px4_device_term: kref count: %u\n", kref_read(&px4->kref));
 
 	atomic_xchg(&px4->available, 0);
+	
+	if (px4->card_ctx.dev) {
+		/* Unregister smart card device */
+		px4_card_unregister(&px4->card_ctx);
+	}
+	
 	ptx_chrdev_group_destroy(px4->chrdev_group);
 
 	kref_put(&px4->kref, px4_device_release);

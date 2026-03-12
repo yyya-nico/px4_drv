@@ -20,6 +20,7 @@
 #include "px4_usb_params.h"
 #include "px4_device_params.h"
 #include "ptx_chrdev.h"
+#include "px4_card.h"
 #include "px4_device.h"
 #include "pxmlt_device.h"
 #include "isdb2056_device.h"
@@ -80,6 +81,7 @@ struct px4_usb_context {
 };
 
 static struct ptx_chrdev_context *px4_usb_chrdev_ctx[MAX_USB_DEVICE_TYPE];
+static struct px4_card_context_group *px4_usb_card_ctx_group[MAX_USB_DEVICE_TYPE];
 
 static int px4_usb_init_bridge(struct device *dev, struct usb_device *usb_dev,
 			       struct it930x_bridge *it930x)
@@ -152,6 +154,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ret = px4_device_init(&ctx->ctx.px4, dev,
 					      usb_dev->serial, px4_use_mldev,
 					      px4_usb_chrdev_ctx[PX4_USB_DEVICE],
+					      px4_usb_card_ctx_group[PX4_USB_DEVICE],
 					      &ctx->quit_completion);
 			break;
 
@@ -167,6 +170,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = PXMLT5_USB_DEVICE;
 			ret = pxmlt_device_init(&ctx->ctx.pxmlt, dev, pxmlt5_model,
 						px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE],
+						px4_usb_card_ctx_group[PXMLT5_USB_DEVICE],
 						&ctx->quit_completion);
 			break;
 
@@ -182,6 +186,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = PXMLT8_USB_DEVICE;
 			ret = pxmlt_device_init(&ctx->ctx.pxmlt, dev, pxmlt8_model,
 						px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE],
+						px4_usb_card_ctx_group[PXMLT8_USB_DEVICE],
 						&ctx->quit_completion);
 			break;
 
@@ -194,6 +199,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = ISDB2056_USB_DEVICE;
 			ret = isdb2056_device_init(&ctx->ctx.isdb2056, dev, ISDB2056_MODEL,
 						   px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE],
+						   px4_usb_card_ctx_group[ISDB2056_USB_DEVICE],
 						   &ctx->quit_completion);
 			break;
 
@@ -206,6 +212,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = ISDB2056_USB_DEVICE;
 			ret = isdb2056_device_init(&ctx->ctx.isdb2056, dev, ISDB2056N_MODEL,
 						   px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE],
+						   px4_usb_card_ctx_group[ISDB2056_USB_DEVICE],
 						   &ctx->quit_completion);
 			break;
 
@@ -218,6 +225,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = ISDB6014_4TS_USB_DEVICE;
 			ret = pxmlt_device_init(&ctx->ctx.pxmlt, dev, ISDB6014_4TS_MODEL,
 						px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE],
+						px4_usb_card_ctx_group[ISDB6014_4TS_USB_DEVICE],
 						&ctx->quit_completion);
 			break;
 
@@ -230,6 +238,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ctx->type = PXM1UR_USB_DEVICE;
 			ret = m1ur_device_init(&ctx->ctx.m1ur, dev,
 						   px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE],
+						   px4_usb_card_ctx_group[PXM1UR_USB_DEVICE],
 						   &ctx->quit_completion);
 			break;
 
@@ -243,6 +252,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ret = s1ur_device_init(&ctx->ctx.s1ur, dev,
 						   PXS1UR_MODEL,
 						   px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE],
+						   px4_usb_card_ctx_group[PXS1UR_USB_DEVICE],
 						   &ctx->quit_completion);
 			break;
 
@@ -256,6 +266,7 @@ static int px4_usb_probe(struct usb_interface *intf,
 			ret = s1ur_device_init(&ctx->ctx.s1ur, dev,
 						ISDBT2071_MODEL,
 						px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE],
+						px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE],
 						&ctx->quit_completion);
 			break;
 
@@ -396,12 +407,20 @@ int px4_usb_register()
 	pr_debug("px4_usb_register: ISDBT2071_USB_MAX_DEVICE: %d\n", ISDBT2071_USB_MAX_DEVICE);
 
 	memset(&px4_usb_chrdev_ctx, 0, sizeof(px4_usb_chrdev_ctx));
+	memset(&px4_usb_card_ctx_group, 0, sizeof(px4_usb_card_ctx_group));
 
 	ret = ptx_chrdev_context_create("px4", "px4video",
 					PX4_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[PX4_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"px4\") failed.\n");
+		goto fail;
+	}
+
+	ret = px4_card_context_create("px4", "px4card", PX4_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[PX4_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"px4card\") failed.\n");
 		goto fail;
 	}
 
@@ -413,11 +432,25 @@ int px4_usb_register()
 		goto fail_mlt5;
 	}
 
+	ret = px4_card_context_create("pxmlt5", "pxmlt5card", PXMLT5_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[PXMLT5_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"pxmlt5card\") failed.\n");
+		goto fail_mlt5;
+	}
+
 	ret = ptx_chrdev_context_create("pxmlt8", "pxmlt8video",
 					PXMLT8_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"pxmlt8\") failed.\n");
+		goto fail_mlt8;
+	}
+
+	ret = px4_card_context_create("pxmlt8", "pxmlt8card", PXMLT8_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[PXMLT8_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"pxmlt8card\") failed.\n");
 		goto fail_mlt8;
 	}
 
@@ -429,11 +462,25 @@ int px4_usb_register()
 		goto fail_isdb2056;
 	}
 
+	ret = px4_card_context_create("isdb2056", "isdb2056card", ISDB2056_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[ISDB2056_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"isdb2056card\") failed.\n");
+		goto fail_isdb2056;
+	}
+
 	ret = ptx_chrdev_context_create("isdb6014", "isdb6014video",
 					ISDB6014_4TS_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"isdb6014\") failed.\n");
+		goto fail_isdb6014;
+	}
+
+	ret = px4_card_context_create("isdb6014", "isdb6014card", ISDB6014_4TS_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[ISDB6014_4TS_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"isdb6014card\") failed.\n");
 		goto fail_isdb6014;
 	}
 
@@ -445,6 +492,13 @@ int px4_usb_register()
 		goto fail_pxm1ur;
 	}
 
+	ret = px4_card_context_create("pxm1ur", "pxm1urcard", PXM1UR_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[PXM1UR_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"pxm1urcard\") failed.\n");
+		goto fail_pxm1ur;
+	}
+
 	ret = ptx_chrdev_context_create("pxs1ur", "pxs1urvideo",
 					PXS1UR_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);
@@ -453,11 +507,25 @@ int px4_usb_register()
 		goto fail_pxs1ur;
 	}
 
+	ret = px4_card_context_create("pxs1ur", "pxs1urcard", PXS1UR_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[PXS1UR_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"pxs1urcard\") failed.\n");
+		goto fail_pxs1ur;
+	}
+
 	ret = ptx_chrdev_context_create("isdbt2071", "isdbt2071video",
 					ISDBT2071_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
 	if (ret) {
 		pr_err("px4_usb_register: ptx_chrdev_context_create(\"isdbt2071\") failed.\n");
+		goto fail_isdbt2071;
+	}
+
+	ret = px4_card_context_create("isdbt2071", "isdbt2071card", ISDBT2071_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"isdbt2071card\") failed.\n");
 		goto fail_isdbt2071;
 	}
 
@@ -471,27 +539,35 @@ int px4_usb_register()
 
 fail_usb:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE]);
 
 fail_isdbt2071:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXS1UR_USB_DEVICE]);
 
 fail_pxs1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXM1UR_USB_DEVICE]);
 
 fail_pxm1ur:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDB6014_4TS_USB_DEVICE]);
 
 fail_isdb6014:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDB2056_USB_DEVICE]);
 
 fail_isdb2056:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXMLT8_USB_DEVICE]);
 
 fail_mlt8:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXMLT5_USB_DEVICE]);
 
 fail_mlt5:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PX4_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PX4_USB_DEVICE]);
 
 fail:
 	return ret;
@@ -501,11 +577,19 @@ void px4_usb_unregister()
 {
 	usb_deregister(&px4_usb_driver);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXS1UR_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXM1UR_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXM1UR_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB6014_4TS_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDB6014_4TS_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDB2056_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[ISDB2056_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT8_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXMLT8_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXMLT5_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PXMLT5_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PX4_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[PX4_USB_DEVICE]);
 }
