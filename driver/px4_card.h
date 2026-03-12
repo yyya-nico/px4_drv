@@ -41,7 +41,6 @@ struct px4_card_context {
 	struct cdev cdev;
 	struct device *device;
 	struct it930x_bridge *it930x;
-	wait_queue_head_t read_wq; 
 	bool card_present;
 	struct px4_card_context_group *parent;
 	struct kref *owner_kref;

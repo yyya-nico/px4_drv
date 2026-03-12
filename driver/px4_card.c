@@ -140,7 +140,8 @@ static ssize_t px4card_fops_read(struct file *file, char __user *buf,
 
 	memset(&rx_data, 0, sizeof(rx_data));
 
-	copy_from_user(&rx_data, buf, sizeof(rx_data));
+	if (copy_from_user(&rx_data, buf, sizeof(rx_data)))
+		return -EFAULT;
 
 	if (!card_ctx)
 		return -EINVAL;
@@ -362,7 +363,10 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 
 		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ\n");
 
-		copy_from_user(&data, argp, sizeof(data));
+		if (copy_from_user(&data, argp, sizeof(data))) {
+			ret = -EFAULT;
+			break;
+		}
 
 		/* Read data from UART */
 		ret = it930x_bcas_get_data(it930x, data.buffer, &data.length);
@@ -429,8 +433,6 @@ static unsigned int px4card_fops_poll(struct file *file,
 		return POLLERR;
 
 	it930x = card_ctx->it930x;
-
-	poll_wait(file, &card_ctx->read_wq, wait);
 
 	mutex_lock(&card_ctx->lock);
 
@@ -565,7 +567,6 @@ int px4_card_register(struct px4_card_context *card_ctx,
 	snprintf(card_ctx->name, sizeof(card_ctx->name), "%s%u", ctx_group->devname, id);
 	card_ctx->dev = dev;
 	card_ctx->it930x = it930x;
-	init_waitqueue_head(&card_ctx->read_wq);
 	card_ctx->card_present = false;
 	card_ctx->parent = ctx_group;
 	card_ctx->owner_kref = owner_kref;
