@@ -23,8 +23,9 @@
 #define PX4CARD_GET_ATR     _IOR(PX4CARD_IOC_MAGIC, 2, struct px4_card_atr)
 #define PX4CARD_SET_BAUDRATE _IOW(PX4CARD_IOC_MAGIC, 3, int)
 #define PX4CARD_DETECT      _IOR(PX4CARD_IOC_MAGIC, 4, int)
-#define PX4CARD_READ        _IOR(PX4CARD_IOC_MAGIC, 5, struct px4_card_data)
-#define PX4CARD_WRITE       _IOW(PX4CARD_IOC_MAGIC, 6, struct px4_card_data)
+#define PX4CARD_READ_READY  _IOR(PX4CARD_IOC_MAGIC, 5, int)
+#define PX4CARD_READ        _IOR(PX4CARD_IOC_MAGIC, 6, struct px4_card_data)
+#define PX4CARD_WRITE       _IOW(PX4CARD_IOC_MAGIC, 7, struct px4_card_data)
 
 /* ATR (Answer To Reset) structure - max 33 bytes per ISO/IEC 7816-3 */
 struct px4_card_atr {

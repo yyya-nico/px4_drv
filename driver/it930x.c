@@ -1424,12 +1424,12 @@ int it930x_bcas_send_data(struct it930x_bridge *it930x, u8 *buf, u8 len)
 	write_len = len;
 
 	while (write_len > 0) {
+		for (i = 0; i < 48; i++)
+			write_buf[i + 1] = buf[buf_idx + i];
+
+		wb.buf = write_buf;
 		if (write_len > 48) {
 			write_buf[0] = 48;
-			for (i = 0; i < 48; i++)
-				write_buf[i + 1] = buf[buf_idx + i];
-
-			wb.buf = write_buf;
 			wb.len = 49;
 
 			ret = it930x_ctrl_msg(it930x,
@@ -1449,10 +1449,6 @@ int it930x_bcas_send_data(struct it930x_bridge *it930x, u8 *buf, u8 len)
 				return ret;
 
 			write_buf[0] = write_len;
-			for (i = 0; i < write_len; i++)
-				write_buf[i + 1] = buf[buf_idx + i];
-
-			wb.buf = write_buf;
 			wb.len = write_len + 1;
 
 			ret = it930x_ctrl_msg(it930x,

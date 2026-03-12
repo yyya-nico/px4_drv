@@ -38,31 +38,6 @@ static void px4_card_context_group_release(struct kref *ref)
 	kfree(ctx_group);
 }
 
-/* Helper: wait for UART data ready */
-static int px4card_wait_data_ready(struct px4_card_context *card_ctx,
-				   bool *ready, long timeout_ms)
-{
-	struct it930x_bridge *it930x = card_ctx->it930x;
-	int ret;
-	unsigned long timeout_jiffies = msecs_to_jiffies(timeout_ms);
-	unsigned long start_time = jiffies;
-
-	*ready = false;
-
-	while (time_before(jiffies, start_time + timeout_jiffies)) {
-		ret = it930x_bcas_check_ready(it930x, ready);
-		if (ret)
-			return ret;
-
-		if (*ready)
-			return 0;
-
-		msleep(10);
-	}
-
-	return -ETIMEDOUT;
-}
-
 /* Helper: receive ATR after card reset */
 static int px4card_receive_atr(struct px4_card_context *card_ctx,
 			       struct px4_card_atr *atr)
@@ -160,44 +135,37 @@ static ssize_t px4card_fops_read(struct file *file, char __user *buf,
 {
 	struct px4_card_context *card_ctx = file->private_data;
 	struct it930x_bridge *it930x;
-	u8 kbuf[256];
-	u8 len;
+	struct px4_card_data rx_data;
 	int ret;
-	bool ready;
+
+	memset(&rx_data, 0, sizeof(rx_data));
+
+	copy_from_user(&rx_data, buf, sizeof(rx_data));
 
 	if (!card_ctx)
 		return -EINVAL;
 
 	it930x = card_ctx->it930x;
 
-	if (count > sizeof(kbuf))
-		count = sizeof(kbuf);
+	if (count > sizeof(rx_data.buffer))
+		count = sizeof(rx_data.buffer);
 
 	mutex_lock(&card_ctx->lock);
 
-	/* Wait for data with timeout */
-	ret = px4card_wait_data_ready(card_ctx, &ready, 1000);
-	if (ret) {
-		if (ret == -ETIMEDOUT)
-			ret = -EAGAIN;
-		goto exit;
-	}
-
 	/* Read data from UART */
-	len = count;
-	ret = it930x_bcas_get_data(it930x, kbuf, &len);
+	ret = it930x_bcas_get_data(it930x, rx_data.buffer, &rx_data.length);
 	if (ret) {
 		dev_err(card_ctx->dev, "px4card_fops_read: failed to get data. (ret: %d)\n", ret);
 		goto exit;
 	}
 
 	/* Copy to user space */
-	if (copy_to_user(buf, kbuf, len)) {
+	if (copy_to_user(buf, &rx_data, sizeof(rx_data))) {
 		ret = -EFAULT;
 		goto exit;
 	}
 
-	ret = len;
+	ret = rx_data.length;
 
 exit:
 	mutex_unlock(&card_ctx->lock);
@@ -210,7 +178,7 @@ static ssize_t px4card_fops_write(struct file *file, const char __user *buf,
 {
 	struct px4_card_context *card_ctx = file->private_data;
 	struct it930x_bridge *it930x;
-	u8 kbuf[256];
+	struct px4_card_data tx_data;
 	int ret;
 
 	if (!card_ctx)
@@ -218,17 +186,17 @@ static ssize_t px4card_fops_write(struct file *file, const char __user *buf,
 
 	it930x = card_ctx->it930x;
 
-	if (count > sizeof(kbuf))
+	if (count > sizeof(tx_data.buffer))
 		return -EINVAL;
 
 	/* Copy from user space */
-	if (copy_from_user(kbuf, buf, count))
+	if (copy_from_user(tx_data.buffer, buf, count))
 		return -EFAULT;
 
 	mutex_lock(&card_ctx->lock);
 
 	/* Send data to UART */
-	ret = it930x_bcas_send_data(it930x, kbuf, count);
+	ret = it930x_bcas_send_data(it930x, tx_data.buffer, count);
 	if (ret) {
 		dev_err(card_ctx->dev, "px4card_fops_write: failed to send data. (ret: %d)\n", ret);
 		goto exit;
@@ -361,23 +329,42 @@ static long px4card_fops_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 
-	case PX4CARD_READ:
+	case PX4CARD_READ_READY:
 	{
-		struct px4_card_data data;
-		bool ready;
+		int ready = 0;
+		bool data_ready;
 
-		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ\n");
+		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ_READY\n");
 
-		/* Wait for data with timeout */
-		ret = px4card_wait_data_ready(card_ctx, &ready, 1000);
+		/* Check if data is ready */
+		ret = it930x_bcas_check_ready(it930x, &data_ready);
 		if (ret) {
-			if (ret == -ETIMEDOUT)
-				ret = -EAGAIN;
+			dev_err(card_ctx->dev, "ioctl: failed to check data ready. (ret: %d)\n", ret);
 			break;
 		}
 
+		ready = data_ready ? 1 : 0;
+
+		/* Copy to user space */
+		if (copy_to_user(argp, &ready, sizeof(ready))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		break;
+	}
+
+	case PX4CARD_READ:
+	{
+		struct px4_card_data data;
+
+		memset(&data, 0, sizeof(data));
+
+		dev_dbg(card_ctx->dev, "px4card_fops_ioctl: PX4CARD_READ\n");
+
+		copy_from_user(&data, argp, sizeof(data));
+
 		/* Read data from UART */
-		data.length = sizeof(data.buffer) - 1;
 		ret = it930x_bcas_get_data(it930x, data.buffer, &data.length);
 		if (ret) {
 			dev_err(card_ctx->dev, "ioctl: failed to get data. (ret: %d)\n", ret);
@@ -603,7 +590,7 @@ int px4_card_register(struct px4_card_context *card_ctx,
 		goto fail_device;
 	}
 
-	dev_info(dev, "px4_card: registered as /dev/%s\n", card_ctx->name);
+	dev_info(dev, "/dev/%s\n", card_ctx->name);
 	return 0;
 
 fail_device:
@@ -626,7 +613,7 @@ void px4_card_unregister(struct px4_card_context *card_ctx)
 
 	ctx_group = card_ctx->parent;
 
-	dev_info(card_ctx->dev, "px4_card: unregistering /dev/%s\n", card_ctx->name);
+	dev_dbg(card_ctx->dev, "px4_card: unregistering /dev/%s\n", card_ctx->name);
 
 	device_destroy(ctx_group->class, card_ctx->cdev.dev);
 	cdev_del(&card_ctx->cdev);
