@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 
 /* PC/SC IFD Handler API headers */
 #include <PCSC/ifdhandler.h>
@@ -30,6 +31,23 @@
 #define RX_ZERO_LENGTH_RETRY_MAX 3
 /* MAX_BUFFER_SIZE is defined in pcsclite.h as 264 */
 
+/* T=1 protocol constants (ISO/IEC 7816-3) */
+#define T1_NAD_IFD_ICC       0x00   /* NAD: IFD=0, ICC=0 */
+#define T1_PCB_I_BLOCK       0x00   /* I-block (bit7=0) */
+#define T1_PCB_I_SEQ         0x40   /* I-block sequence number (bit6) */
+#define T1_PCB_I_CHAIN       0x20   /* I-block more-data chain flag (bit5) */
+#define T1_PCB_R_BLOCK       0x80   /* R-block (bits7:6=10) */
+#define T1_PCB_R_SEQ         0x10   /* R-block next-expected seq (bit4) */
+#define T1_PCB_R_NO_ERROR    0x00   /* R-block: no error */
+#define T1_PCB_S_RESYNCH_REQ 0xC0   /* S-block RESYNCH request */
+#define T1_PCB_S_RESYNCH_RSP 0xE0   /* S-block RESYNCH response */
+#define T1_PCB_S_IFS_REQ     0xC1   /* S-block IFS request */
+#define T1_PCB_S_IFS_RSP     0xE1   /* S-block IFS response */
+#define T1_IFS_IFSD          254    /* IFD max INF size to advertise to card */
+#define T1_GUARD_INTERVAL_MS 50L    /* Min ms between TX and previous RX */
+#define T1_RX_TIMEOUT_MS     200   /* Max ms to wait for card ready */
+#define T1_RX_POLL_MS        10     /* Polling interval ms for RX ready */
+
 /* Reader context */
 struct reader_context {
 	int fd;
@@ -38,6 +56,9 @@ struct reader_context {
 	unsigned int atr_len;
 	int protocol;
 	unsigned int t1_ifsc;
+	int t1_edc_crc;            /* 0=LRC (default), 1=CRC */
+	int t1_seq;                /* IFD TX I-block sequence number (0 or 1) */
+	struct timeval last_rx_time; /* Timestamp of last successful RX */
 };
 
 static struct reader_context readers[MAX_READERS];
@@ -63,17 +84,23 @@ static struct reader_context *get_reader(DWORD Lun)
 	return &readers[idx];
 }
 
-/* Extract IFSC from ATR TA3 when T=1 parameters are present. */
-static unsigned int px4_ifd_parse_t1_ifsc(const unsigned char *atr,
-					  unsigned int atr_len)
+/* Parse T=1 parameters from ATR: IFSC (from TA3 for T=1 interface)
+ * and EDC type (from TCi for T=1 interface, bit0=1 means CRC). */
+static void px4_ifd_parse_t1_atr(struct reader_context *ctx)
 {
+	const unsigned char *atr = ctx->atr;
+	unsigned int atr_len = ctx->atr_len;
 	unsigned int idx;
 	unsigned int iface_idx;
 	unsigned int y;
 	unsigned int protocol_for_set;
 
+	/* Reset to defaults */
+	ctx->t1_ifsc = DEFAULT_T1_IFSC;
+	ctx->t1_edc_crc = 0;
+
 	if (!atr || atr_len < 2)
-		return DEFAULT_T1_IFSC;
+		return;
 
 	idx = 1;
 	iface_idx = 1;
@@ -86,8 +113,9 @@ static unsigned int px4_ifd_parse_t1_ifsc(const unsigned char *atr,
 			if (idx >= atr_len)
 				break;
 
+			/* TA3 for T=1 interface: IFSC */
 			if (iface_idx == 3 && protocol_for_set == 1 && atr[idx] != 0)
-				return atr[idx];
+				ctx->t1_ifsc = atr[idx];
 		}
 
 		if (y & 0x2) { /* TBi */
@@ -100,6 +128,10 @@ static unsigned int px4_ifd_parse_t1_ifsc(const unsigned char *atr,
 			idx++;
 			if (idx >= atr_len)
 				break;
+
+			/* TCi for T=1 interface: bit0=1 means CRC EDC */
+			if (protocol_for_set == 1 && (atr[idx] & 0x01))
+				ctx->t1_edc_crc = 1;
 		}
 
 		if (y & 0x8) { /* TDi */
@@ -115,8 +147,6 @@ static unsigned int px4_ifd_parse_t1_ifsc(const unsigned char *atr,
 
 		break;
 	}
-
-	return DEFAULT_T1_IFSC;
 }
 
 /* Read response with retries to avoid treating transient 0-byte reads as success. */
@@ -176,11 +206,11 @@ static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
 		memcpy(RxBuffer + total_len, rx_data.buffer, rx_data.length);
 		total_len += rx_data.length;
 
-		if (ctx->protocol != SCARD_PROTOCOL_T1)
+		if (ctx->protocol != 1)
 			break;
 
 		if (t1_frame_len == 0 && total_len >= 3) {
-			t1_frame_len = (DWORD)RxBuffer[2] + 4; /* NAD + PCB + LEN + EDC(1) */
+			t1_frame_len = (DWORD)RxBuffer[2] + 3 + (DWORD)(ctx->t1_edc_crc ? 2 : 1); /* NAD+PCB+LEN+INF+EDC */
 			if (t1_frame_len > rx_capacity) {
 				*RxLength = t1_frame_len;
 				return IFD_ERROR_INSUFFICIENT_BUFFER;
@@ -191,13 +221,398 @@ static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
 			break;
 	}
 
-	if (ctx->protocol == SCARD_PROTOCOL_T1 && t1_frame_len > 0 && total_len < t1_frame_len)
+	if (ctx->protocol == 1 && t1_frame_len > 0 && total_len < t1_frame_len)
 		return IFD_RESPONSE_TIMEOUT;
 
 	if (total_len == 0)
 		return IFD_RESPONSE_TIMEOUT;
 
 	*RxLength = total_len;
+	return IFD_SUCCESS;
+}
+
+/* --- T=1 low-level helpers --- */
+
+/* LRC: XOR of all bytes */
+static unsigned char px4_t1_lrc(const unsigned char *data, unsigned int len)
+{
+	unsigned char lrc = 0;
+	unsigned int i;
+	for (i = 0; i < len; i++)
+		lrc ^= data[i];
+	return lrc;
+}
+
+/* CRC-CCITT: polynomial 0x1021, init 0xFFFF (ISO/IEC 7816-3) */
+static unsigned short px4_t1_crc(const unsigned char *data, unsigned int len)
+{
+	unsigned short crc = 0xFFFF;
+	unsigned int i, j;
+	for (i = 0; i < len; i++) {
+		crc ^= (unsigned short)data[i] << 8;
+		for (j = 0; j < 8; j++) {
+			if (crc & 0x8000)
+				crc = (unsigned short)((crc << 1) ^ 0x1021u);
+			else
+				crc = (unsigned short)(crc << 1);
+		}
+	}
+	return crc;
+}
+
+/*
+ * Build a T=1 frame: [NAD][PCB][LEN][INF...][EDC...]
+ * Returns total frame length, or 0 if frame_max is too small.
+ */
+static unsigned int px4_t1_make_frame(unsigned char *frame,
+				      unsigned int frame_max,
+				      unsigned char pcb,
+				      const unsigned char *inf,
+				      unsigned char inf_len,
+				      int use_crc)
+{
+	unsigned int edc_len = use_crc ? 2u : 1u;
+	unsigned int total_needed = 3u + inf_len + edc_len;
+	unsigned int hdr_inf;
+	unsigned short crc;
+
+	if (frame_max < total_needed)
+		return 0;
+
+	frame[0] = T1_NAD_IFD_ICC;
+	frame[1] = pcb;
+	frame[2] = inf_len;
+	if (inf_len > 0)
+		memcpy(frame + 3, inf, inf_len);
+
+	hdr_inf = 3u + inf_len;
+	if (use_crc) {
+		crc = px4_t1_crc(frame, hdr_inf);
+		frame[hdr_inf]     = (unsigned char)(crc >> 8);
+		frame[hdr_inf + 1] = (unsigned char)(crc & 0xFF);
+	} else {
+		frame[hdr_inf] = px4_t1_lrc(frame, hdr_inf);
+	}
+	return total_needed;
+}
+
+/* Wait at least T1_GUARD_INTERVAL_MS ms since last successful RX. */
+static void px4_ifd_guard_interval(struct reader_context *ctx)
+{
+	struct timeval now;
+	long elapsed_ms;
+
+	gettimeofday(&now, NULL);
+	elapsed_ms = (now.tv_sec  - ctx->last_rx_time.tv_sec)  * 1000L
+		   + (now.tv_usec - ctx->last_rx_time.tv_usec) / 1000L;
+
+	if (elapsed_ms < T1_GUARD_INTERVAL_MS)
+		usleep((useconds_t)((T1_GUARD_INTERVAL_MS - elapsed_ms) * 1000L));
+}
+
+/* Send a raw frame to the card device. */
+static RESPONSECODE px4_ifd_send_frame(struct reader_context *ctx,
+				       const unsigned char *frame,
+				       unsigned int len)
+{
+	struct px4_card_data tx;
+
+	if (len == 0 || len > sizeof(tx.buffer))
+		return IFD_COMMUNICATION_ERROR;
+
+	memset(&tx, 0, sizeof(tx));
+	memcpy(tx.buffer, frame, len);
+	tx.length = (unsigned char)len;
+
+	if (ioctl(ctx->fd, PX4CARD_WRITE, &tx) < 0) {
+		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
+		return IFD_COMMUNICATION_ERROR;
+	}
+	return IFD_SUCCESS;
+}
+
+/* Poll PX4CARD_READ_READY until data is ready or timeout_ms elapses. */
+static RESPONSECODE px4_ifd_wait_rx_ready(struct reader_context *ctx,
+					  unsigned int timeout_ms)
+{
+	int ready;
+	unsigned int elapsed = 0;
+
+	while (elapsed < timeout_ms) {
+		ready = 0;
+		if (ioctl(ctx->fd, PX4CARD_READ_READY, &ready) < 0) {
+			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
+			     strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+		if (ready)
+			return IFD_SUCCESS;
+		usleep(T1_RX_POLL_MS * 1000u);
+		elapsed += T1_RX_POLL_MS;
+	}
+	return IFD_RESPONSE_TIMEOUT;
+}
+
+/*
+ * Receive a complete T=1 frame (NAD+PCB+LEN+INF+EDC).
+ * Updates ctx->last_rx_time on success.
+ */
+static RESPONSECODE px4_ifd_recv_t1_frame(struct reader_context *ctx,
+					  unsigned char *rx_buf,
+					  DWORD *rx_len)
+{
+	struct px4_card_data rx_data;
+	DWORD rx_capacity = *rx_len;
+	DWORD total = 0;
+	DWORD expected = 0;
+	int zero_retries = 0;
+	int edc_len = ctx->t1_edc_crc ? 2 : 1;
+	RESPONSECODE rc;
+	int ret;
+
+	*rx_len = 0;
+	rc = px4_ifd_wait_rx_ready(ctx, T1_RX_TIMEOUT_MS);
+	if (rc != IFD_SUCCESS)
+		return rc;
+
+	while (1) {
+		memset(&rx_data, 0, sizeof(rx_data));
+		ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
+		if (ret < 0) {
+			if (errno == EAGAIN) {
+				if (total > 0)
+					break;
+				return IFD_RESPONSE_TIMEOUT;
+			}
+			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s",
+			     strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+
+		if (rx_data.length == 0) {
+			if (total > 0)
+				break;
+			zero_retries++;
+			if (zero_retries >= RX_ZERO_LENGTH_RETRY_MAX)
+				return IFD_RESPONSE_TIMEOUT;
+			usleep(5000);
+			continue;
+		}
+		zero_retries = 0;
+
+		if (total + rx_data.length > rx_capacity)
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+
+		memcpy(rx_buf + total, rx_data.buffer, rx_data.length);
+		total += rx_data.length;
+
+		/* Compute expected frame length once LEN byte is available */
+		if (expected == 0 && total >= 3)
+			expected = (DWORD)rx_buf[2] + 3 + (DWORD)edc_len;
+
+		if (expected > 0 && total >= expected)
+			break;
+	}
+
+	gettimeofday(&ctx->last_rx_time, NULL);
+	*rx_len = total;
+	return IFD_SUCCESS;
+}
+
+/*
+ * T=1 initialization after card reset:
+ *   1. RESYNCH S-block request/response
+ *   2. IFS S-block request (IFSD=254) / response
+ * Retries up to 3 times on failure.
+ */
+static RESPONSECODE px4_ifd_t1_init(struct reader_context *ctx)
+{
+	unsigned char frame[8];
+	unsigned char rx_buf[8];
+	unsigned char ifsd = T1_IFS_IFSD;
+	unsigned int frame_len;
+	DWORD rx_len;
+	RESPONSECODE rc;
+	int retry;
+
+	ctx->t1_seq = 0;
+
+	for (retry = 0; retry < 3; retry++) {
+		/* --- Send RESYNCH S-block --- */
+		frame_len = px4_t1_make_frame(frame, sizeof(frame),
+					      T1_PCB_S_RESYNCH_REQ,
+					      NULL, 0, ctx->t1_edc_crc);
+		if (frame_len == 0)
+			return IFD_COMMUNICATION_ERROR;
+
+		rc = px4_ifd_send_frame(ctx, frame, frame_len);
+		if (rc != IFD_SUCCESS)
+			continue;
+
+		rx_len = sizeof(rx_buf);
+		rc = px4_ifd_recv_t1_frame(ctx, rx_buf, &rx_len);
+		if (rc != IFD_SUCCESS) {
+			Log1(PCSC_LOG_ERROR, "T=1 init: no RESYNCH response");
+			continue;
+		}
+		if (rx_len < 3 || rx_buf[1] != T1_PCB_S_RESYNCH_RSP) {
+			Log2(PCSC_LOG_ERROR, "T=1 init: RESYNCH PCB mismatch (got 0x%02X)",
+			     (unsigned int)rx_buf[1]);
+			continue;
+		}
+		Log1(PCSC_LOG_INFO, "T=1 RESYNCH OK");
+
+		/* --- Send IFS S-block (IFSD = 254) --- */
+		frame_len = px4_t1_make_frame(frame, sizeof(frame),
+					      T1_PCB_S_IFS_REQ,
+					      &ifsd, 1, ctx->t1_edc_crc);
+		if (frame_len == 0)
+			return IFD_COMMUNICATION_ERROR;
+
+		px4_ifd_guard_interval(ctx);
+		rc = px4_ifd_send_frame(ctx, frame, frame_len);
+		if (rc != IFD_SUCCESS)
+			continue;
+
+		rx_len = sizeof(rx_buf);
+		rc = px4_ifd_recv_t1_frame(ctx, rx_buf, &rx_len);
+		if (rc != IFD_SUCCESS) {
+			Log1(PCSC_LOG_ERROR, "T=1 init: no IFS response");
+			continue;
+		}
+		if (rx_len < 4 || rx_buf[1] != T1_PCB_S_IFS_RSP) {
+			Log2(PCSC_LOG_ERROR, "T=1 init: IFS PCB mismatch (got 0x%02X)",
+			     (unsigned int)rx_buf[1]);
+			continue;
+		}
+		Log2(PCSC_LOG_INFO, "T=1 IFS OK (IFSD=%u)", (unsigned int)rx_buf[3]);
+		return IFD_SUCCESS;
+	}
+
+	Log1(PCSC_LOG_ERROR, "T=1 init: all retries exhausted");
+	return IFD_COMMUNICATION_ERROR;
+}
+
+/*
+ * T=1 Transmit: wrap APDU in I-block(s), send, receive response I-block(s).
+ * Handles chaining in both directions.
+ */
+static RESPONSECODE px4_ifd_t1_transmit(struct reader_context *ctx,
+					 const unsigned char *apdu,
+					 DWORD apdu_len,
+					 unsigned char *resp,
+					 PDWORD resp_len)
+{
+	/* NAD(1)+PCB(1)+LEN(1)+INF(254)+EDC(2) = 259 */
+	unsigned char frame[259];
+	unsigned char rx_frame[259];
+	DWORD rx_frame_len;
+	DWORD offset = 0;
+	unsigned int inf_len;
+	unsigned char pcb;
+	int chain;
+	DWORD total_resp = 0;
+	DWORD resp_capacity = *resp_len;
+	unsigned int frame_len;
+	RESPONSECODE rc;
+
+	*resp_len = 0;
+
+	/* --- Send phase: split APDU into I-blocks of <= t1_ifsc bytes --- */
+	do {
+		inf_len = (unsigned int)(apdu_len - offset);
+		chain = 0;
+		if (inf_len > ctx->t1_ifsc) {
+			inf_len = ctx->t1_ifsc;
+			chain = 1;
+		}
+
+		pcb = T1_PCB_I_BLOCK;
+		if (ctx->t1_seq)
+			pcb |= T1_PCB_I_SEQ;
+		if (chain)
+			pcb |= T1_PCB_I_CHAIN;
+
+		frame_len = px4_t1_make_frame(frame, sizeof(frame), pcb,
+					      apdu + offset,
+					      (unsigned char)inf_len,
+					      ctx->t1_edc_crc);
+		if (frame_len == 0)
+			return IFD_COMMUNICATION_ERROR;
+
+		px4_ifd_guard_interval(ctx);
+		LogXxd(PCSC_LOG_DEBUG, "T=1 TX I-block:", frame, frame_len);
+		rc = px4_ifd_send_frame(ctx, frame, frame_len);
+		if (rc != IFD_SUCCESS)
+			return rc;
+
+		offset += (DWORD)inf_len;
+		ctx->t1_seq ^= 1;
+
+		/* For chained TX: wait for R-block ACK from card */
+		if (chain) {
+			rx_frame_len = sizeof(rx_frame);
+			rc = px4_ifd_recv_t1_frame(ctx, rx_frame, &rx_frame_len);
+			if (rc != IFD_SUCCESS)
+				return rc;
+			if (rx_frame_len < 3 ||
+			    (rx_frame[1] & 0xC0) != T1_PCB_R_BLOCK) {
+				Log1(PCSC_LOG_ERROR,
+				     "T=1 TX chain: expected R-block ACK");
+				return IFD_COMMUNICATION_ERROR;
+			}
+			LogXxd(PCSC_LOG_DEBUG, "T=1 RX R-block (chain ACK):",
+			       rx_frame, rx_frame_len);
+		}
+	} while (offset < apdu_len);
+
+	/* --- Receive phase: collect response I-blocks --- */
+	do {
+		rx_frame_len = sizeof(rx_frame);
+		rc = px4_ifd_recv_t1_frame(ctx, rx_frame, &rx_frame_len);
+		if (rc != IFD_SUCCESS)
+			return rc;
+
+		LogXxd(PCSC_LOG_DEBUG, "T=1 RX I-block:", rx_frame, rx_frame_len);
+
+		/* Must be an I-block (bit7=0) */
+		if (rx_frame_len < 3 || (rx_frame[1] & 0x80) != 0) {
+			Log2(PCSC_LOG_ERROR,
+			     "T=1 RX: expected I-block, got PCB=0x%02X",
+			     (unsigned int)rx_frame[1]);
+			return IFD_COMMUNICATION_ERROR;
+		}
+
+		inf_len = (unsigned int)rx_frame[2];
+		if (total_resp + (DWORD)inf_len > resp_capacity) {
+			*resp_len = total_resp + (DWORD)inf_len;
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		}
+		if (inf_len > 0)
+			memcpy(resp + total_resp, rx_frame + 3, inf_len);
+		total_resp += (DWORD)inf_len;
+
+		/* Chain flag: send R-block requesting next block */
+		if (rx_frame[1] & T1_PCB_I_CHAIN) {
+			/* R-block seq = next expected card I-block seq */
+			int card_seq = (rx_frame[1] & T1_PCB_I_SEQ) ? 1 : 0;
+			unsigned char r_pcb = (unsigned char)(T1_PCB_R_BLOCK |
+						T1_PCB_R_NO_ERROR);
+			if (!card_seq)   /* next expected = !current */
+				r_pcb |= T1_PCB_R_SEQ;
+			frame_len = px4_t1_make_frame(frame, sizeof(frame),
+						      r_pcb, NULL, 0,
+						      ctx->t1_edc_crc);
+			px4_ifd_guard_interval(ctx);
+			rc = px4_ifd_send_frame(ctx, frame, frame_len);
+			if (rc != IFD_SUCCESS)
+				return rc;
+		} else {
+			break; /* Last block */
+		}
+	} while (1);
+
+	*resp_len = total_resp;
 	return IFD_SUCCESS;
 }
 
@@ -265,10 +680,12 @@ RESPONSECODE IFDHCloseChannel(DWORD Lun)
 	ctx->atr_len = 0;
 	ctx->protocol = 0;
 	ctx->t1_ifsc = DEFAULT_T1_IFSC;
+	ctx->t1_edc_crc = 0;
+	ctx->t1_seq = 0;
+	memset(&ctx->last_rx_time, 0, sizeof(ctx->last_rx_time));
 
 	return IFD_SUCCESS;
 }
-
 /*
  * IFDHGetCapabilities
  * Returns capabilities of the reader
@@ -383,8 +800,9 @@ RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 		Log1(PCSC_LOG_INFO, "Protocol set to T=0");
 		break;
 	case SCARD_PROTOCOL_T1:
-		ctx->t1_ifsc = px4_ifd_parse_t1_ifsc(ctx->atr, ctx->atr_len);
+		px4_ifd_parse_t1_atr(ctx);
 		Log2(PCSC_LOG_INFO, "Protocol set to T=1, IFSC=%u", ctx->t1_ifsc);
+		Log2(PCSC_LOG_INFO, "EDC type: %s", ctx->t1_edc_crc ? "CRC" : "LRC");
 		break;
 	default:
 		Log2(PCSC_LOG_ERROR, "Unsupported protocol: 0x%X", Protocol);
@@ -436,10 +854,11 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 			return IFD_COMMUNICATION_ERROR;
 		}
 
-		/* Store ATR */
+		/* Store ATR and parse T=1 parameters */
 		memcpy(ctx->atr, atr_data.data, atr_data.length);
 		ctx->atr_len = atr_data.length;
-		ctx->t1_ifsc = px4_ifd_parse_t1_ifsc(ctx->atr, ctx->atr_len);
+		ctx->protocol = 1; /* B-CAS is always T=1 */
+		px4_ifd_parse_t1_atr(ctx);
 
 		/* Return ATR to caller */
 		if (*AtrLength < atr_data.length) {
@@ -452,7 +871,24 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 
 		Log1(PCSC_LOG_INFO, "ATR received");
 		LogXxd(PCSC_LOG_INFO, "ATR:", Atr, *AtrLength);
-		Log2(PCSC_LOG_INFO, "Derived IFSC from ATR: %u", ctx->t1_ifsc);
+		Log2(PCSC_LOG_INFO, "IFSC from ATR: %u", ctx->t1_ifsc);
+		Log2(PCSC_LOG_INFO, "EDC type: %s", ctx->t1_edc_crc ? "CRC" : "LRC");
+
+		/* Switch UART baudrate to 19200 (B-CAS standard, typically used after ATR) */
+		const int baurate_19200 = PX4CARD_BAUDRATE_19200;
+		ret = ioctl(ctx->fd, PX4CARD_SET_BAUDRATE, &baurate_19200);
+		if (ret < 0) {
+			Log1(PCSC_LOG_ERROR, "PX4CARD_SET_BAUDRATE failed");
+			return IFD_COMMUNICATION_ERROR;
+		}
+		Log1(PCSC_LOG_INFO, "UART baudrate set to 19200");
+
+		/* T=1 initialization: RESYNCH then IFS exchange */
+		ret = (int)px4_ifd_t1_init(ctx);
+		if (ret != IFD_SUCCESS) {
+			Log1(PCSC_LOG_ERROR, "T=1 init (RESYNCH+IFS) failed");
+			return IFD_COMMUNICATION_ERROR;
+		}
 		break;
 
 	case IFD_POWER_DOWN:
@@ -487,9 +923,6 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	int ret;
 
 	Log1(PCSC_LOG_INFO, "IFDHTransmitToICC");
-	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
-	if (SendPci.Protocol == SCARD_PROTOCOL_T0 || SendPci.Protocol == SCARD_PROTOCOL_T1)
-		ctx->protocol = SendPci.Protocol;
 
 	if (!ctx || ctx->fd < 0) {
 		if (RxLength)
@@ -500,15 +933,37 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	if (!TxBuffer || !RxBuffer || !RxLength)
 		return IFD_COMMUNICATION_ERROR;
 
-	rx_capacity = *RxLength;
+	if (SendPci.Protocol == 0 ||
+	    SendPci.Protocol == 1)
+		ctx->protocol = SendPci.Protocol;
 
-	if (TxLength == 0 || TxLength > UCHAR_MAX || TxLength > sizeof(tx_data.buffer))
+	if (TxLength == 0)
 		return IFD_COMMUNICATION_ERROR;
 
-	if (ctx->protocol == SCARD_PROTOCOL_T1 && TxLength > (DWORD)(ctx->t1_ifsc + 4))
-		Log2(PCSC_LOG_DEBUG, "T=1 TX may require chaining, length=%u", TxLength);
+	rx_capacity = *RxLength;
+	LogXxd(PCSC_LOG_INFO, "TX:", TxBuffer, TxLength);
 
-	/* Send APDU to the driver via ioctl */
+	/* T=1: full ISO 7816-3 framing with guard interval and I-block chaining */
+	if (ctx->protocol == 1) {
+		if (TxLength > 254)
+			return IFD_COMMUNICATION_ERROR;
+		ret = (int)px4_ifd_t1_transmit(ctx, TxBuffer, TxLength,
+					      RxBuffer, RxLength);
+		if (ret != IFD_SUCCESS)
+			return (RESPONSECODE)ret;
+		Log1(PCSC_LOG_INFO, "RX completed");
+		LogXxd(PCSC_LOG_INFO, "RX:", RxBuffer, *RxLength);
+		if (RecvPci) {
+			RecvPci->Protocol = ctx->protocol;
+			RecvPci->Length = sizeof(*RecvPci);
+		}
+		return IFD_SUCCESS;
+	}
+
+	/* T=0 / raw: send APDU as-is */
+	if (TxLength > sizeof(tx_data.buffer))
+		return IFD_COMMUNICATION_ERROR;
+
 	memset(&tx_data, 0, sizeof(tx_data));
 	memcpy(tx_data.buffer, TxBuffer, TxLength);
 	tx_data.length = (unsigned char)TxLength;
@@ -519,18 +974,16 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		return IFD_COMMUNICATION_ERROR;
 	}
 
-	/* Poll readiness and keep prior 5-second timeout behavior */
 	while (elapsed_ms < timeout_ms) {
 		ready = 0;
 		ret = ioctl(ctx->fd, PX4CARD_READ_READY, &ready);
 		if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s", strerror(errno));
+			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
+			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
 		}
-
 		if (ready)
 			break;
-
 		usleep(poll_interval_ms * 1000);
 		elapsed_ms += poll_interval_ms;
 	}
@@ -541,9 +994,9 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	}
 
 	*RxLength = rx_capacity;
-	ret = px4_ifd_read_response(ctx, RxBuffer, RxLength);
+	ret = (int)px4_ifd_read_response(ctx, RxBuffer, RxLength);
 	if (ret != IFD_SUCCESS)
-		return ret;
+		return (RESPONSECODE)ret;
 
 	Log1(PCSC_LOG_INFO, "RX completed");
 	LogXxd(PCSC_LOG_INFO, "RX:", RxBuffer, *RxLength);
