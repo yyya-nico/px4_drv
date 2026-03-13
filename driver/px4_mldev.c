@@ -17,6 +17,8 @@ static DEFINE_MUTEX(px4_mldev_glock);
 
 static bool px4_mldev_get_chrdev_status(struct px4_mldev *mldev,
 				       unsigned int dev_id);
+static bool px4_mldev_has_power_user(struct px4_mldev *mldev,
+				      unsigned int dev_id);
 static bool px4_mldev_is_power_interlocking_required(struct px4_mldev *mldev,
 						     unsigned int dev_id);
 
@@ -65,6 +67,7 @@ int px4_mldev_alloc(struct px4_mldev **mldev,  enum px4_mldev_mode mode,
 	for (i = 0; i < 2; i++) {
 		m->dev[i] = (i == dev_id) ? px4 : NULL;
 		m->power_state[i] = false;
+		m->card_state[i] = false;
 		for (j = 0; j < 4; j++)
 			m->chrdev_state[i][j] = false;
 	}
@@ -121,6 +124,7 @@ int px4_mldev_add(struct px4_mldev *mldev, struct px4_device *px4)
 	}
 
 	mldev->power_state[dev_id] = false;
+	mldev->card_state[dev_id] = false;
 	for (i = 0; i < 4; i++)
 		mldev->chrdev_state[dev_id][i] = false;
 
@@ -165,11 +169,12 @@ int px4_mldev_remove(struct px4_mldev *mldev, struct px4_device *px4)
 
 	mldev->dev[dev_id] = NULL;
 	mldev->power_state[dev_id] = false;
+	mldev->card_state[dev_id] = false;
 	for (i = 0; i < 4; i++)
 		mldev->chrdev_state[dev_id][i] = false;
 
 	if (mldev->dev[other_dev_id] &&
-	    !px4_mldev_get_chrdev_status(mldev, other_dev_id) &&
+	    !px4_mldev_has_power_user(mldev, other_dev_id) &&
 	    mldev->power_state[other_dev_id]) {
 		mldev->backend_set_power(mldev->dev[other_dev_id], false);
 		mldev->power_state[other_dev_id] = false;
@@ -187,6 +192,13 @@ static bool px4_mldev_get_chrdev_status(struct px4_mldev *mldev,
 {
 	bool *state = mldev->chrdev_state[dev_id];
 	return (state[0] || state[1] || state[2] || state[3]);
+}
+
+static bool px4_mldev_has_power_user(struct px4_mldev *mldev,
+				      unsigned int dev_id)
+{
+	return px4_mldev_get_chrdev_status(mldev, dev_id) ||
+	       mldev->card_state[dev_id];
 }
 
 static bool px4_mldev_is_power_interlocking_required(struct px4_mldev *mldev,
@@ -254,7 +266,9 @@ int px4_mldev_set_power(struct px4_mldev *mldev, struct px4_device *px4,
 
 	if (!px4_mldev_get_chrdev_status(mldev, dev_id)) {
 		if (mldev->power_state[dev_id] != state &&
-		    (state || !px4_mldev_is_power_interlocking_required(mldev, other_dev_id))) {
+		    (state ||
+		     (!mldev->card_state[dev_id] &&
+		      !px4_mldev_is_power_interlocking_required(mldev, other_dev_id)))) {
 			ret = mldev->backend_set_power(mldev->dev[dev_id],
 						       state);
 			if (ret && state)
@@ -279,11 +293,58 @@ int px4_mldev_set_power(struct px4_mldev *mldev, struct px4_device *px4,
 
 		if (interlocking == state &&
 		    mldev->power_state[other_dev_id] != interlocking &&
-		    (state || !px4_mldev_get_chrdev_status(mldev, other_dev_id))) {
+		    (state || !px4_mldev_has_power_user(mldev, other_dev_id))) {
 			ret = mldev->backend_set_power(mldev->dev[other_dev_id],
 						       state);
 			if (!ret || !state)
 				mldev->power_state[other_dev_id] = state;
+		}
+	}
+
+exit:
+	mutex_unlock(&mldev->lock);
+	return ret;
+}
+
+int px4_mldev_set_card_power(struct px4_mldev *mldev,
+			     struct px4_device *px4, bool state)
+{
+	int ret = 0;
+	bool prev_state;
+	bool should_power;
+	unsigned int dev_id = px4->serial.dev_id - 1;
+	unsigned int other_dev_id = (dev_id) ? 0 : 1;
+
+	if (dev_id > 1)
+		return -EINVAL;
+
+	mutex_lock(&mldev->lock);
+
+	if (mldev->dev[dev_id] != px4) {
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (mldev->card_state[dev_id] == state)
+		goto exit;
+
+	prev_state = mldev->card_state[dev_id];
+	mldev->card_state[dev_id] = state;
+
+	if (!px4_mldev_get_chrdev_status(mldev, dev_id)) {
+		should_power = state ||
+			px4_mldev_is_power_interlocking_required(mldev,
+							 other_dev_id);
+
+		if (mldev->power_state[dev_id] != should_power) {
+			ret = mldev->backend_set_power(mldev->dev[dev_id],
+					       should_power);
+			if (ret && should_power) {
+				mldev->card_state[dev_id] = prev_state;
+				goto exit;
+			}
+
+			mldev->power_state[dev_id] = should_power;
 		}
 	}
 

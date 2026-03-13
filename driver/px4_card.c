@@ -95,12 +95,24 @@ static int px4card_receive_atr(struct px4_card_context *card_ctx,
 static int px4card_fops_open(struct inode *inode, struct file *file)
 {
 	struct px4_card_context *card_ctx;
+	int ret;
 
 	card_ctx = container_of(inode->i_cdev, struct px4_card_context, cdev);
 
 	if (atomic_cmpxchg(&card_ctx->open, 0, 1)) {
 		dev_dbg(card_ctx->dev, "px4card_fops_open: device busy\n");
 		return -EBUSY;
+	}
+
+	if (card_ctx->backend_acquire) {
+		ret = card_ctx->backend_acquire(card_ctx->backend_priv);
+		if (ret) {
+			atomic_set(&card_ctx->open, 0);
+			dev_err(card_ctx->dev,
+				"px4card_fops_open: backend acquire failed. (ret: %d)\n",
+				ret);
+			return ret;
+		}
 	}
 
 	kref_get(card_ctx->owner_kref);
@@ -120,6 +132,9 @@ static int px4card_fops_release(struct inode *inode, struct file *file)
 		return -EINVAL;
 
 	mutex_lock(&card_ctx->lock);
+	if (card_ctx->backend_release)
+		card_ctx->backend_release(card_ctx->backend_priv);
+
 	atomic_set(&card_ctx->open, 0);
 	dev_dbg(card_ctx->dev, "px4card_fops_release: device closed\n");
 	mutex_unlock(&card_ctx->lock);
@@ -538,7 +553,10 @@ int px4_card_register(struct px4_card_context *card_ctx,
 		      struct px4_card_context_group *ctx_group,
 		      struct it930x_bridge *it930x,
 		      struct kref *owner_kref,
-		      void (*owner_kref_release)(struct kref *))
+		      void (*owner_kref_release)(struct kref *),
+		      void *backend_priv,
+		      px4_card_backend_acquire_t backend_acquire,
+		      px4_card_backend_release_t backend_release)
 {
 	unsigned int id;
 	dev_t devt;
@@ -571,6 +589,9 @@ int px4_card_register(struct px4_card_context *card_ctx,
 	card_ctx->parent = ctx_group;
 	card_ctx->owner_kref = owner_kref;
 	card_ctx->owner_kref_release = owner_kref_release;
+	card_ctx->backend_priv = backend_priv;
+	card_ctx->backend_acquire = backend_acquire;
+	card_ctx->backend_release = backend_release;
 
 	/* Initialize cdev */
 	devt = MKDEV(MAJOR(ctx_group->dev_base), MINOR(ctx_group->dev_base) + id);

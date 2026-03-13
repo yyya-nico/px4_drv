@@ -38,11 +38,14 @@ struct isdb2056_chrdev {
 };
 
 struct isdb2056_device {
+	struct mutex lock;
 	struct kref kref;
 	atomic_t available;
 	struct device *dev;
 	enum isdb2056_model isdb2056_model;
 	struct completion *quit_completion;
+	unsigned int open_count;
+	unsigned int card_open_count;
 	struct ptx_chrdev_group *chrdev_group;
 	struct isdb2056_chrdev chrdev2056;
 	struct it930x_bridge it930x;

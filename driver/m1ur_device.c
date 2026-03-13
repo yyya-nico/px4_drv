@@ -58,6 +58,43 @@ static int m1ur_backend_set_power(struct m1ur_device *m1ur,
 	return 0;
 }
 
+static int m1ur_card_backend_acquire(void *priv)
+{
+	int ret = 0;
+	struct m1ur_device *m1ur = priv;
+
+	mutex_lock(&m1ur->lock);
+
+	if (!m1ur->card_open_count && !m1ur->open_count) {
+		ret = m1ur_backend_set_power(m1ur, true);
+		if (ret)
+			goto exit;
+	}
+
+	m1ur->card_open_count++;
+
+exit:
+	mutex_unlock(&m1ur->lock);
+	return ret;
+}
+
+static void m1ur_card_backend_release(void *priv)
+{
+	struct m1ur_device *m1ur = priv;
+
+	mutex_lock(&m1ur->lock);
+
+	if (!m1ur->card_open_count)
+		goto exit;
+
+	m1ur->card_open_count--;
+	if (!m1ur->card_open_count && !m1ur->open_count)
+		m1ur_backend_set_power(m1ur, false);
+
+exit:
+	mutex_unlock(&m1ur->lock);
+}
+
 static int m1ur_backend_init(struct m1ur_device *m1ur)
 {
 	int ret = 0;
@@ -227,6 +264,7 @@ static struct tc90522_regbuf tc_init_s[] = {
 static int m1ur_chrdev_open(struct ptx_chrdev *chrdev)
 {
 	int ret = 0;
+	bool need_power_on = false;
 	struct ptx_chrdev_group *chrdev_group = chrdev->parent;
 	struct m1ur_chrdev *chrdevm1ur = chrdev->priv;
 	struct m1ur_device *m1ur = container_of(chrdevm1ur,
@@ -237,12 +275,19 @@ static int m1ur_chrdev_open(struct ptx_chrdev *chrdev)
 	dev_dbg(m1ur->dev,
 		"m1ur_chrdev_open %u\n", chrdev_group->id);
 
-	ret = m1ur_backend_set_power(m1ur, true);
-	if (ret) {
-		dev_err(m1ur->dev,
-			"m1ur_chrdev_open %u: m1ur_backend_set_power(true) failed. (ret: %d)\n",
-			chrdev_group->id, ret);
-		goto fail_backend_power;
+	mutex_lock(&m1ur->lock);
+	if (!m1ur->open_count && !m1ur->card_open_count)
+		need_power_on = true;
+	mutex_unlock(&m1ur->lock);
+
+	if (need_power_on) {
+		ret = m1ur_backend_set_power(m1ur, true);
+		if (ret) {
+			dev_err(m1ur->dev,
+				"m1ur_chrdev_open %u: m1ur_backend_set_power(true) failed. (ret: %d)\n",
+				chrdev_group->id, ret);
+			goto fail_backend_power;
+		}
 	}
 
 	ret = m1ur_backend_init(m1ur);
@@ -323,6 +368,10 @@ static int m1ur_chrdev_open(struct ptx_chrdev *chrdev)
 		return ret;
 	}
 
+	mutex_lock(&m1ur->lock);
+	m1ur->open_count++;
+	mutex_unlock(&m1ur->lock);
+
 	kref_get(&m1ur->kref);
 	return 0;
 
@@ -330,7 +379,10 @@ fail_backend:
 	m1ur_backend_term(m1ur);
 
 fail_backend_init:
-	m1ur_backend_set_power(m1ur, false);
+	mutex_lock(&m1ur->lock);
+	if (!m1ur->open_count && !m1ur->card_open_count)
+		m1ur_backend_set_power(m1ur, false);
+	mutex_unlock(&m1ur->lock);
 
 fail_backend_power:
 	return ret;
@@ -348,8 +400,21 @@ static int m1ur_chrdev_release(struct ptx_chrdev *chrdev)
 		"m1ur_chrdev_release %u: kref count: %u\n",
 		chrdev_group->id, kref_read(&m1ur->kref));
 
+	mutex_lock(&m1ur->lock);
+	if (!m1ur->open_count) {
+		mutex_unlock(&m1ur->lock);
+		return -EALREADY;
+	}
+
+	m1ur->open_count--;
+	mutex_unlock(&m1ur->lock);
+
 	m1ur_backend_term(m1ur);
-	m1ur_backend_set_power(m1ur, false);
+
+	mutex_lock(&m1ur->lock);
+	if (!m1ur->open_count && !m1ur->card_open_count)
+		m1ur_backend_set_power(m1ur, false);
+	mutex_unlock(&m1ur->lock);
 
 	kref_put(&m1ur->kref, m1ur_device_release);
 	return 0;
@@ -939,10 +1004,13 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 
 	get_device(dev);
 
+	mutex_init(&m1ur->lock);
 	kref_init(&m1ur->kref);
 	m1ur->dev = dev;
 	m1ur->quit_completion = quit_completion;
 	m1ur->card_ctx_group = card_ctx_group;
+	m1ur->open_count = 0;
+	m1ur->card_open_count = 0;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
 	if (!stream_ctx) {
@@ -992,7 +1060,9 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 
 	/* Register smart card device */
 	ret = px4_card_register(&m1ur->card_ctx, dev, card_ctx_group, it930x,
-				&m1ur->kref, m1ur_device_release);
+				&m1ur->kref, m1ur_device_release,
+				m1ur, m1ur_card_backend_acquire,
+				m1ur_card_backend_release);
 	if (ret) {
 		dev_warn(dev, "m1ur_device_init: failed to register card device. (ret: %d)\n", ret);
 		/* Non-fatal error - continue without card support */
@@ -1069,6 +1139,7 @@ fail_bus:
 	kfree(m1ur->stream_ctx);
 
 fail:
+	mutex_destroy(&m1ur->lock);
 	put_device(dev);
 	return ret;
 }
@@ -1085,6 +1156,7 @@ static void m1ur_device_release(struct kref *kref)
 	itedtv_bus_term(&m1ur->it930x.bus);
 
 	kfree(m1ur->stream_ctx);
+	mutex_destroy(&m1ur->lock);
 	put_device(m1ur->dev);
 
 	complete(m1ur->quit_completion);
