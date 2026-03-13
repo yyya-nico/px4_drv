@@ -46,9 +46,8 @@ int init_module(void)
 		"\n");
 
 	ret = px4_usb_register();
-	if (ret) {
+	if (ret)
 		return ret;
-	}
 
 	return 0;
 }
