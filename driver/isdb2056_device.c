@@ -58,6 +58,43 @@ static int isdb2056_backend_set_power(struct isdb2056_device *isdb2056,
 	return 0;
 }
 
+static int isdb2056_card_backend_acquire(void *priv)
+{
+	int ret = 0;
+	struct isdb2056_device *isdb2056 = priv;
+
+	mutex_lock(&isdb2056->lock);
+
+	if (!isdb2056->card_open_count && !isdb2056->open_count) {
+		ret = isdb2056_backend_set_power(isdb2056, true);
+		if (ret)
+			goto exit;
+	}
+
+	isdb2056->card_open_count++;
+
+exit:
+	mutex_unlock(&isdb2056->lock);
+	return ret;
+}
+
+static void isdb2056_card_backend_release(void *priv)
+{
+	struct isdb2056_device *isdb2056 = priv;
+
+	mutex_lock(&isdb2056->lock);
+
+	if (!isdb2056->card_open_count)
+		goto exit;
+
+	isdb2056->card_open_count--;
+	if (!isdb2056->card_open_count && !isdb2056->open_count)
+		isdb2056_backend_set_power(isdb2056, false);
+
+exit:
+	mutex_unlock(&isdb2056->lock);
+}
+
 static int isdb2056_backend_init(struct isdb2056_device *isdb2056)
 {
 	int ret = 0;
@@ -240,6 +277,7 @@ static struct tc90522_regbuf tc_init_s[] = {
 static int isdb2056_chrdev_open(struct ptx_chrdev *chrdev)
 {
 	int ret = 0;
+	bool need_power_on = false;
 	struct ptx_chrdev_group *chrdev_group = chrdev->parent;
 	struct isdb2056_chrdev *chrdev2056 = chrdev->priv;
 	struct isdb2056_device *isdb2056 = container_of(chrdev2056,
@@ -250,12 +288,19 @@ static int isdb2056_chrdev_open(struct ptx_chrdev *chrdev)
 	dev_dbg(isdb2056->dev,
 		"isdb2056_chrdev_open %u\n", chrdev_group->id);
 
-	ret = isdb2056_backend_set_power(isdb2056, true);
-	if (ret) {
-		dev_err(isdb2056->dev,
-			"isdb2056_chrdev_open %u: isdb2056_backend_set_power(true) failed. (ret: %d)\n",
-			chrdev_group->id, ret);
-		goto fail_backend_power;
+	mutex_lock(&isdb2056->lock);
+	if (!isdb2056->open_count && !isdb2056->card_open_count)
+		need_power_on = true;
+	mutex_unlock(&isdb2056->lock);
+
+	if (need_power_on) {
+		ret = isdb2056_backend_set_power(isdb2056, true);
+		if (ret) {
+			dev_err(isdb2056->dev,
+				"isdb2056_chrdev_open %u: isdb2056_backend_set_power(true) failed. (ret: %d)\n",
+				chrdev_group->id, ret);
+			goto fail_backend_power;
+		}
 	}
 
 	ret = isdb2056_backend_init(isdb2056);
@@ -336,6 +381,10 @@ static int isdb2056_chrdev_open(struct ptx_chrdev *chrdev)
 		return ret;
 	}
 
+	mutex_lock(&isdb2056->lock);
+	isdb2056->open_count++;
+	mutex_unlock(&isdb2056->lock);
+
 	kref_get(&isdb2056->kref);
 	return 0;
 
@@ -343,7 +392,10 @@ fail_backend:
 	isdb2056_backend_term(isdb2056);
 
 fail_backend_init:
-	isdb2056_backend_set_power(isdb2056, false);
+	mutex_lock(&isdb2056->lock);
+	if (!isdb2056->open_count && !isdb2056->card_open_count)
+		isdb2056_backend_set_power(isdb2056, false);
+	mutex_unlock(&isdb2056->lock);
 
 fail_backend_power:
 	return ret;
@@ -361,8 +413,21 @@ static int isdb2056_chrdev_release(struct ptx_chrdev *chrdev)
 		"isdb2056_chrdev_release %u: kref count: %u\n",
 		chrdev_group->id, kref_read(&isdb2056->kref));
 
+	mutex_lock(&isdb2056->lock);
+	if (!isdb2056->open_count) {
+		mutex_unlock(&isdb2056->lock);
+		return -EALREADY;
+	}
+
+	isdb2056->open_count--;
+	mutex_unlock(&isdb2056->lock);
+
 	isdb2056_backend_term(isdb2056);
-	isdb2056_backend_set_power(isdb2056, false);
+
+	mutex_lock(&isdb2056->lock);
+	if (!isdb2056->open_count && !isdb2056->card_open_count)
+		isdb2056_backend_set_power(isdb2056, false);
+	mutex_unlock(&isdb2056->lock);
 
 	kref_put(&isdb2056->kref, isdb2056_device_release);
 	return 0;
@@ -993,11 +1058,14 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 
 	get_device(dev);
 
+	mutex_init(&isdb2056->lock);
 	kref_init(&isdb2056->kref);
 	isdb2056->dev = dev;
 	isdb2056->card_ctx_group = card_ctx_group;
 	isdb2056->isdb2056_model = isdb2056_model;
 	isdb2056->quit_completion = quit_completion;
+	isdb2056->open_count = 0;
+	isdb2056->card_open_count = 0;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
 	if (!stream_ctx) {
@@ -1047,7 +1115,9 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 
 	/* Register smart card device */
 	ret = px4_card_register(&isdb2056->card_ctx, dev, card_ctx_group, it930x,
-				&isdb2056->kref, isdb2056_device_release);
+				&isdb2056->kref, isdb2056_device_release,
+				isdb2056, isdb2056_card_backend_acquire,
+				isdb2056_card_backend_release);
 	if (ret) {
 		dev_warn(dev, "isdb2056_device_init: failed to register card device. (ret: %d)\n", ret);
 		/* Non-fatal error - continue without card support */
@@ -1124,6 +1194,7 @@ fail_bus:
 	kfree(isdb2056->stream_ctx);
 
 fail:
+	mutex_destroy(&isdb2056->lock);
 	put_device(dev);
 	return ret;
 }
@@ -1140,6 +1211,7 @@ static void isdb2056_device_release(struct kref *kref)
 	itedtv_bus_term(&isdb2056->it930x.bus);
 
 	kfree(isdb2056->stream_ctx);
+	mutex_destroy(&isdb2056->lock);
 	put_device(isdb2056->dev);
 
 	complete(isdb2056->quit_completion);

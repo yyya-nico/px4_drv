@@ -60,6 +60,43 @@ static int s1ur_backend_set_power(struct s1ur_device *s1ur,
 	return 0;
 }
 
+static int s1ur_card_backend_acquire(void *priv)
+{
+	int ret = 0;
+	struct s1ur_device *s1ur = priv;
+
+	mutex_lock(&s1ur->lock);
+
+	if (!s1ur->card_open_count && !s1ur->open_count) {
+		ret = s1ur_backend_set_power(s1ur, true);
+		if (ret)
+			goto exit;
+	}
+
+	s1ur->card_open_count++;
+
+exit:
+	mutex_unlock(&s1ur->lock);
+	return ret;
+}
+
+static void s1ur_card_backend_release(void *priv)
+{
+	struct s1ur_device *s1ur = priv;
+
+	mutex_lock(&s1ur->lock);
+
+	if (!s1ur->card_open_count)
+		goto exit;
+
+	s1ur->card_open_count--;
+	if (!s1ur->card_open_count && !s1ur->open_count)
+		s1ur_backend_set_power(s1ur, false);
+
+exit:
+	mutex_unlock(&s1ur->lock);
+}
+
 static int s1ur_backend_init(struct s1ur_device *s1ur)
 {
 	int ret = 0;
@@ -244,6 +281,7 @@ static struct tc90522_regbuf tc_init_isdbt2071t[] = {
 static int s1ur_chrdev_open(struct ptx_chrdev *chrdev)
 {
 	int ret = 0;
+	bool need_power_on = false;
 	struct ptx_chrdev_group *chrdev_group = chrdev->parent;
 	struct s1ur_chrdev *chrdevs1ur = chrdev->priv;
 	struct s1ur_device *s1ur = container_of(chrdevs1ur,
@@ -254,12 +292,19 @@ static int s1ur_chrdev_open(struct ptx_chrdev *chrdev)
 	dev_dbg(s1ur->dev,
 		"s1ur_chrdev_open %u\n", chrdev_group->id);
 
-	ret = s1ur_backend_set_power(s1ur, true);
-	if (ret) {
-		dev_err(s1ur->dev,
-			"s1ur_chrdev_open %u: s1ur_backend_set_power(true) failed. (ret: %d)\n",
-			chrdev_group->id, ret);
-		goto fail_backend_power;
+	mutex_lock(&s1ur->lock);
+	if (!s1ur->open_count && !s1ur->card_open_count)
+		need_power_on = true;
+	mutex_unlock(&s1ur->lock);
+
+	if (need_power_on) {
+		ret = s1ur_backend_set_power(s1ur, true);
+		if (ret) {
+			dev_err(s1ur->dev,
+				"s1ur_chrdev_open %u: s1ur_backend_set_power(true) failed. (ret: %d)\n",
+				chrdev_group->id, ret);
+			goto fail_backend_power;
+		}
 	}
 
 	ret = s1ur_backend_init(s1ur);
@@ -354,6 +399,10 @@ static int s1ur_chrdev_open(struct ptx_chrdev *chrdev)
 		break;
 	}
 
+	mutex_lock(&s1ur->lock);
+	s1ur->open_count++;
+	mutex_unlock(&s1ur->lock);
+
 	kref_get(&s1ur->kref);
 	return 0;
 
@@ -361,7 +410,10 @@ fail_backend:
 	s1ur_backend_term(s1ur);
 
 fail_backend_init:
-	s1ur_backend_set_power(s1ur, false);
+	mutex_lock(&s1ur->lock);
+	if (!s1ur->open_count && !s1ur->card_open_count)
+		s1ur_backend_set_power(s1ur, false);
+	mutex_unlock(&s1ur->lock);
 
 fail_backend_power:
 	return ret;
@@ -379,8 +431,21 @@ static int s1ur_chrdev_release(struct ptx_chrdev *chrdev)
 		"s1ur_chrdev_release %u: kref count: %u\n",
 		chrdev_group->id, kref_read(&s1ur->kref));
 
+	mutex_lock(&s1ur->lock);
+	if (!s1ur->open_count) {
+		mutex_unlock(&s1ur->lock);
+		return -EALREADY;
+	}
+
+	s1ur->open_count--;
+	mutex_unlock(&s1ur->lock);
+
 	s1ur_backend_term(s1ur);
-	s1ur_backend_set_power(s1ur, false);
+
+	mutex_lock(&s1ur->lock);
+	if (!s1ur->open_count && !s1ur->card_open_count)
+		s1ur_backend_set_power(s1ur, false);
+	mutex_unlock(&s1ur->lock);
 
 	kref_put(&s1ur->kref, s1ur_device_release);
 	return 0;
@@ -797,12 +862,15 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 
 	get_device(dev);
 
+	mutex_init(&s1ur->lock);
 	kref_init(&s1ur->kref);
 	s1ur->dev = dev;
 	s1ur->card_ctx_group = card_ctx_group;
 	s1ur->s1ur_model = s1ur_model;
 	card_devname = (s1ur_model == ISDBT2071_MODEL) ? "isdbt2071card" : "pxs1urcard";
 	s1ur->quit_completion = quit_completion;
+	s1ur->open_count = 0;
+	s1ur->card_open_count = 0;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
 	if (!stream_ctx) {
@@ -852,7 +920,9 @@ int s1ur_device_init(struct s1ur_device *s1ur, struct device *dev,
 
 	/* Register smart card device */
 	ret = px4_card_register(&s1ur->card_ctx, dev, card_ctx_group, it930x,
-				&s1ur->kref, s1ur_device_release);
+				&s1ur->kref, s1ur_device_release,
+				s1ur, s1ur_card_backend_acquire,
+				s1ur_card_backend_release);
 	if (ret) {
 		dev_warn(dev, "s1ur_device_init: failed to register card device. (ret: %d)\n", ret);
 		/* Non-fatal error - continue without card support */
@@ -918,6 +988,7 @@ fail_bus:
 	kfree(s1ur->stream_ctx);
 
 fail:
+	mutex_destroy(&s1ur->lock);
 	put_device(dev);
 	return ret;
 }
@@ -934,6 +1005,7 @@ static void s1ur_device_release(struct kref *kref)
 	itedtv_bus_term(&s1ur->it930x.bus);
 
 	kfree(s1ur->stream_ctx);
+	mutex_destroy(&s1ur->lock);
 	put_device(s1ur->dev);
 
 	complete(s1ur->quit_completion);

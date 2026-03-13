@@ -30,6 +30,7 @@ struct px4_mldev {
 	unsigned long long serial_number;
 	struct px4_device *dev[2];
 	bool power_state[2];
+	bool card_state[2];
 	bool chrdev_state[2][4];
 	int (*backend_set_power)(struct px4_device *px4, bool state);
 };
@@ -43,5 +44,7 @@ int px4_mldev_add(struct px4_mldev *mldev, struct px4_device *px4);
 int px4_mldev_remove(struct px4_mldev *mldev, struct px4_device *px4);
 int px4_mldev_set_power(struct px4_mldev *mldev, struct px4_device *px4,
 			unsigned int chrdev_id, bool state, bool *first);
+int px4_mldev_set_card_power(struct px4_mldev *mldev,
+			     struct px4_device *px4, bool state);
 
 #endif

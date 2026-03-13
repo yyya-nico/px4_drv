@@ -36,11 +36,14 @@ struct s1ur_chrdev {
 };
 
 struct s1ur_device {
+	struct mutex lock;
 	struct kref kref;
 	atomic_t available;
 	struct device *dev;
 	enum s1ur_model s1ur_model;
 	struct completion *quit_completion;
+	unsigned int open_count;
+	unsigned int card_open_count;
 	struct ptx_chrdev_group *chrdev_group;
 	struct s1ur_chrdev chrdevs1ur;
 	struct it930x_bridge it930x;

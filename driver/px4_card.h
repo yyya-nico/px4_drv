@@ -18,6 +18,9 @@
 #include "it930x.h"
 #include "px4_card_ioctl.h"
 
+typedef int (*px4_card_backend_acquire_t)(void *priv);
+typedef void (*px4_card_backend_release_t)(void *priv);
+
 /* Card context group - manages device class and region for a group (e.g., px4, pxmlt5) */
 struct px4_card_context_group {
 	struct kref kref;
@@ -45,6 +48,9 @@ struct px4_card_context {
 	struct px4_card_context_group *parent;
 	struct kref *owner_kref;
 	void (*owner_kref_release)(struct kref *);
+	void *backend_priv;
+	px4_card_backend_acquire_t backend_acquire;
+	px4_card_backend_release_t backend_release;
 };
 
 /* Context group management */
@@ -59,7 +65,10 @@ int px4_card_register(struct px4_card_context *card_ctx,
 		      struct px4_card_context_group *ctx_group,
 		      struct it930x_bridge *it930x,
 		      struct kref *owner_kref,
-		      void (*owner_kref_release)(struct kref *));
+		      void (*owner_kref_release)(struct kref *),
+		      void *backend_priv,
+		      px4_card_backend_acquire_t backend_acquire,
+		      px4_card_backend_release_t backend_release);
 
 void px4_card_unregister(struct px4_card_context *card_ctx);
 

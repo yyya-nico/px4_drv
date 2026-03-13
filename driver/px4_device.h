@@ -52,6 +52,7 @@ struct px4_device {
 	struct px4_mldev *mldev;
 	struct completion *quit_completion;
 	unsigned int open_count;
+	unsigned int card_open_count;
 	unsigned int lnb_power_count;
 	unsigned int streaming_count;
 	struct ptx_chrdev_group *chrdev_group;

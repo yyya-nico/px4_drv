@@ -58,6 +58,43 @@ static int pxmlt_backend_set_power(struct pxmlt_device *pxmlt, bool state)
 	return 0;
 }
 
+static int pxmlt_card_backend_acquire(void *priv)
+{
+	int ret = 0;
+	struct pxmlt_device *pxmlt = priv;
+
+	mutex_lock(&pxmlt->lock);
+
+	if (!pxmlt->card_open_count && !pxmlt->open_count) {
+		ret = pxmlt_backend_set_power(pxmlt, true);
+		if (ret)
+			goto exit;
+	}
+
+	pxmlt->card_open_count++;
+
+exit:
+	mutex_unlock(&pxmlt->lock);
+	return ret;
+}
+
+static void pxmlt_card_backend_release(void *priv)
+{
+	struct pxmlt_device *pxmlt = priv;
+
+	mutex_lock(&pxmlt->lock);
+
+	if (!pxmlt->card_open_count)
+		goto exit;
+
+	pxmlt->card_open_count--;
+	if (!pxmlt->card_open_count && !pxmlt->open_count)
+		pxmlt_backend_set_power(pxmlt, false);
+
+exit:
+	mutex_unlock(&pxmlt->lock);
+}
+
 #if 0
 static int pxmlt_backend_init(struct pxmlt_device *pxmlt)
 {
@@ -223,7 +260,7 @@ static int pxmlt_chrdev_open(struct ptx_chrdev *chrdev)
 
 	mutex_lock(&pxmlt->lock);
 
-	if (!pxmlt->open_count) {
+	if (!pxmlt->open_count && !pxmlt->card_open_count) {
 		ret = pxmlt_backend_set_power(pxmlt, true);
 		if (ret) {
 			dev_err(pxmlt->dev,
@@ -318,7 +355,7 @@ fail_tuner_init:
 	cxd2856er_term(&chrdevm->cxd2856er);
 
 fail_demod_init:
-	if (!pxmlt->open_count)
+	if (!pxmlt->open_count && !pxmlt->card_open_count)
 		pxmlt_backend_set_power(pxmlt, false);
 
 fail_backend_power:
@@ -354,7 +391,7 @@ static int pxmlt_chrdev_release(struct ptx_chrdev *chrdev)
 	cxd2856er_term(&chrdevm->cxd2856er);
 
 	pxmlt->open_count--;
-	if (!pxmlt->open_count)
+	if (!pxmlt->open_count && !pxmlt->card_open_count)
 		pxmlt_backend_set_power(pxmlt, false);
 
 	if (kref_put(&pxmlt->kref, pxmlt_device_release))
@@ -954,6 +991,7 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	pxmlt->quit_completion = quit_completion;
 	pxmlt->card_ctx_group = card_ctx_group;
 	pxmlt->open_count = 0;
+	pxmlt->card_open_count = 0;
 	pxmlt->lnb_power_count = 0;
 	pxmlt->streaming_count = 0;
 	mutex_init(&pxmlt->tuner_lock[0]);
@@ -1038,7 +1076,9 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 	/* Register smart card device */
 	if (card_devname[0]) {
 		ret = px4_card_register(&pxmlt->card_ctx, dev, card_ctx_group, it930x,
-					&pxmlt->kref, pxmlt_device_release);
+					&pxmlt->kref, pxmlt_device_release,
+					pxmlt, pxmlt_card_backend_acquire,
+					pxmlt_card_backend_release);
 		if (ret) {
 			dev_warn(dev, "pxmlt_device_init: failed to register card device. (ret: %d)\n", ret);
 			/* Non-fatal error - continue without card support */

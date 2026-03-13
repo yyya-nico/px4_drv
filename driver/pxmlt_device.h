@@ -53,6 +53,7 @@ struct pxmlt_device {
 	struct device *dev;
 	struct completion *quit_completion;
 	unsigned int open_count;
+	unsigned int card_open_count;
 	unsigned int lnb_power_count;
 	unsigned int streaming_count;
 	struct mutex tuner_lock[2];

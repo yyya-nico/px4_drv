@@ -58,6 +58,60 @@ static int px4_backend_set_power(struct px4_device *px4, bool state)
 	return 0;
 }
 
+static int px4_card_backend_acquire(void *priv)
+{
+	int ret = 0;
+	struct px4_device *px4 = priv;
+
+	mutex_lock(&px4->lock);
+
+	if (px4->mldev) {
+		if (!px4->card_open_count) {
+			ret = px4_mldev_set_card_power(px4->mldev, px4, true);
+			if (ret)
+				goto exit;
+		}
+	} else if (!px4->card_open_count && !px4->open_count) {
+		ret = px4_backend_set_power(px4, true);
+		if (ret)
+			goto exit;
+	}
+
+	px4->card_open_count++;
+
+exit:
+	mutex_unlock(&px4->lock);
+	return ret;
+}
+
+static void px4_card_backend_release(void *priv)
+{
+	int ret = 0;
+	struct px4_device *px4 = priv;
+
+	mutex_lock(&px4->lock);
+
+	if (!px4->card_open_count)
+		goto exit;
+
+	px4->card_open_count--;
+	if (px4->card_open_count)
+		goto exit;
+
+	if (px4->mldev)
+		ret = px4_mldev_set_card_power(px4->mldev, px4, false);
+	else if (!px4->open_count)
+		px4_backend_set_power(px4, false);
+
+exit:
+	mutex_unlock(&px4->lock);
+
+	if (ret)
+		dev_warn(px4->dev,
+			 "px4_card_backend_release: px4_mldev_set_card_power(false) failed. (ret: %d)\n",
+			 ret);
+}
+
 static int px4_backend_init(struct px4_device *px4)
 {
 	int ret = 0, i;
@@ -292,12 +346,14 @@ static int px4_chrdev_open(struct ptx_chrdev *chrdev)
 			goto fail_backend_power;
 		}
 	} else if (!px4->open_count) {
-		ret = px4_backend_set_power(px4, true);
-		if (ret) {
-			dev_err(px4->dev,
-				"px4_chrdev_open %u:%u: px4_backend_set_power(true) failed. (ret: %d)\n",
-				chrdev_group->id, chrdev->id, ret);
-			goto fail_backend_power;
+		if (!px4->card_open_count) {
+			ret = px4_backend_set_power(px4, true);
+			if (ret) {
+				dev_err(px4->dev,
+					"px4_chrdev_open %u:%u: px4_backend_set_power(true) failed. (ret: %d)\n",
+					chrdev_group->id, chrdev->id, ret);
+				goto fail_backend_power;
+			}
 		}
 		need_init = true;
 	}
@@ -513,7 +569,7 @@ fail_backend:
 fail_backend_init:
 	if (px4->mldev)
 		px4_mldev_set_power(px4->mldev, px4, chrdev->id, false, NULL);
-	else if (!px4->open_count)
+	else if (!px4->open_count && !px4->card_open_count)
 		px4_backend_set_power(px4, false);
 
 fail_backend_power:
@@ -546,7 +602,7 @@ static int px4_chrdev_release(struct ptx_chrdev *chrdev)
 	px4->open_count--;
 	if (!px4->open_count) {
 		px4_backend_term(px4);
-		if (!px4->mldev)
+		if (!px4->mldev && !px4->card_open_count)
 			px4_backend_set_power(px4, false);
 	} else if (atomic_read(&px4->available)) {
 		/* sleep tuners */
@@ -1196,6 +1252,7 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 	px4->mldev = NULL;
 	px4->quit_completion = quit_completion;
 	px4->open_count = 0;
+	px4->card_open_count = 0;
 	px4->lnb_power_count = 0;
 	px4->streaming_count = 0;
 	px4->card_ctx_group = card_ctx_group;
@@ -1292,7 +1349,9 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 
 	/* Register smart card device */
 	ret = px4_card_register(&px4->card_ctx, dev, card_ctx_group, it930x,
-				&px4->kref, px4_device_release);
+				&px4->kref, px4_device_release,
+				px4, px4_card_backend_acquire,
+				px4_card_backend_release);
 	if (ret) {
 		dev_warn(dev, "px4_device_init: failed to register card device. (ret: %d)\n", ret);
 		/* Non-fatal error - continue without card support */
