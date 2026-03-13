@@ -44,7 +44,7 @@
 #define T1_PCB_S_IFS_REQ     0xC1   /* S-block IFS request */
 #define T1_PCB_S_IFS_RSP     0xE1   /* S-block IFS response */
 #define T1_IFS_IFSD          254    /* IFD max INF size to advertise to card */
-#define T1_GUARD_INTERVAL_MS 50L    /* Min ms between TX and previous RX */
+#define T1_GUARD_INTERVAL_MS 0L    /* Min ms between TX and previous RX */
 #define T1_RX_TIMEOUT_MS     200   /* Max ms to wait for card ready */
 #define T1_RX_POLL_MS        10     /* Polling interval ms for RX ready */
 
