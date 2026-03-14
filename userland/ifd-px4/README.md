@@ -35,14 +35,14 @@ make
 cd userland/ifd-px4
 sudo make install
 
-# pcscd設定
-
-# 使うチューナーのコメント解除 使わないチューナーはコメント化
-vi px4card.conf
-
-# コピー
+# pcscd設定をコピー (DEVICENAME /dev/null で全機種に対応)
 sudo install -m 644 px4card.conf /etc/reader.conf.d/
 ```
+
+デフォルトの `px4card.conf` は `DEVICENAME /dev/null` に設定されており、  
+この特別な設定のときは接続されている機種を自動的に検出するようになっています。  
+複数台接続している場合や特定のデバイスノードを固定したい場合は、  
+ファイル内のコメントを参照して明示的なエントリに切り替えてください。
 
 ## 使い方
 

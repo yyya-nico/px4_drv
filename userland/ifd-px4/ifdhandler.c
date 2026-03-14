@@ -616,6 +616,53 @@ static RESPONSECODE px4_ifd_t1_transmit(struct reader_context *ctx,
 	return IFD_SUCCESS;
 }
 
+/* Known card device name prefixes, in probe order */
+static const char * const px4_card_prefixes[] = {
+	"px4card",
+	"pxmlt5card",
+	"pxmlt8card",
+	"isdb2056card",
+	"isdb6014card",
+	"pxm1urcard",
+	"pxs1urcard",
+	"isdbt2071card",
+	NULL
+};
+/* Try indices 0..PX4_CARD_AUTO_MAX_IDX-1 for each prefix */
+#define PX4_CARD_AUTO_MAX_IDX 4
+
+/*
+ * px4_ifd_auto_open
+ * Scan /dev/<prefix><N> for all known device types and open the first one
+ * that exists and is accessible. The opened path is stored in ctx->device_name.
+ * Returns a valid fd on success, -1 if no device was found.
+ */
+static int px4_ifd_auto_open(struct reader_context *ctx)
+{
+	const char * const *prefix;
+	char path[256];
+	int fd;
+	int idx;
+
+	for (prefix = px4_card_prefixes; *prefix != NULL; prefix++) {
+		for (idx = 0; idx < PX4_CARD_AUTO_MAX_IDX; idx++) {
+			snprintf(path, sizeof(path), "/dev/%s%d", *prefix, idx);
+			fd = open(path, O_RDWR | O_NOCTTY);
+			if (fd >= 0) {
+				snprintf(ctx->device_name,
+					 sizeof(ctx->device_name),
+					 "%s", path);
+				Log2(PCSC_LOG_INFO,
+				     "Auto-detected device: %s", path);
+				return fd;
+			}
+		}
+	}
+
+	Log1(PCSC_LOG_ERROR, "Auto-detect: no PX4 card device found in /dev/");
+	return -1;
+}
+
 /*
  * IFDHCreateChannel
  * Opens a communication channel to the device
@@ -649,15 +696,22 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 	ctx->fd = -1;
 	ctx->t1_ifsc = DEFAULT_T1_IFSC;
 
-	/* Open device */
-	ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
-	if (ctx->fd < 0) {
-		Log1(PCSC_LOG_ERROR, "Failed to open device");
-		return IFD_COMMUNICATION_ERROR;
+	/* Open device — DeviceName="/dev/null" triggers automatic discovery */
+	if (strcmp(DeviceName, "/dev/null") == 0) {
+		ctx->fd = px4_ifd_auto_open(ctx);
+		if (ctx->fd < 0)
+			return IFD_COMMUNICATION_ERROR;
+	} else {
+		ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
+		if (ctx->fd < 0) {
+			Log2(PCSC_LOG_ERROR, "Failed to open device: %s",
+			     strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+		strncpy(ctx->device_name, DeviceName,
+			sizeof(ctx->device_name) - 1);
 	}
-
-	strncpy(ctx->device_name, DeviceName, sizeof(ctx->device_name) - 1);
-	Log1(PCSC_LOG_INFO, "Device opened");
+	Log2(PCSC_LOG_INFO, "Device opened: %s", ctx->device_name);
 
 	return IFD_SUCCESS;
 }
