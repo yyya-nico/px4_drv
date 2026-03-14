@@ -115,9 +115,6 @@ cd userland/ifd-px4
 make
 sudo make install
 
-# pcscd設定のインストール
-sudo install -m 644 px4card.conf /etc/reader.conf.d/
-
 # pcscdの再起動
 sudo systemctl restart pcscd
 
