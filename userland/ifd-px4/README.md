@@ -34,14 +34,6 @@ make
 ```bash
 cd userland/ifd-px4
 sudo make install
-
-# pcscd設定
-
-# 使うチューナーのコメント解除 使わないチューナーはコメント化
-vi px4card.conf
-
-# コピー
-sudo install -m 644 px4card.conf /etc/reader.conf.d/
 ```
 
 ## 使い方
@@ -116,7 +108,7 @@ sudo cat /dev/px4card0 | hexdump -C
 
 ```bash
 # 設定ファイルの確認
-cat /etc/reader.conf.d/px4card.conf
+cat /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
 
 # IFDハンドラーのインストール確認
 ls -l /usr/lib/pcsc/drivers/ifd-px4/Contents/Linux/libpx4ifd.so
@@ -161,12 +153,6 @@ sudo pcscd -f -d -a
 
 - 初期: 9600 bps
 - 切替可能: 19200 bps (PPS経由)
-
-## 制限事項
-
-- 1デバイスにつき1スロットのみ対応
-- ホットプラグは部分的対応（デバイスの抜き差しには未対応）
-- 複数カードの同時アクセスは排他制御あり
 
 ## ライセンス
 

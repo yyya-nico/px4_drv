@@ -11,7 +11,8 @@
                 "/usr/src/linux-headers-*-generic/include",
                 "/usr/src/linux-headers-*-generic/arch/x86/include/generated",
                 "/usr/src/linux-headers-*-generic/include/uapi",
-                "/usr/src/linux-headers-*-generic/arch/x86/include"
+                "/usr/src/linux-headers-*-generic/arch/x86/include",
+                "/usr/include/PCSC"
             ],
             "intelliSenseMode": "linux-gcc-x64",
             "compilerPath": "/usr/bin/gcc",

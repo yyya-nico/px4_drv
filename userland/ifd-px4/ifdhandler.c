@@ -84,6 +84,46 @@ static struct reader_context *get_reader(DWORD Lun)
 	return &readers[idx];
 }
 
+static int px4_ifd_is_device_gone_errno(int err)
+{
+	switch (err) {
+	case ENODEV:
+	case ENXIO:
+	case ENOENT:
+	case EBADF:
+	case EPIPE:
+	case ECONNRESET:
+#ifdef ESHUTDOWN
+	case ESHUTDOWN:
+#endif
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static void px4_ifd_clear_reader_state(struct reader_context *ctx)
+{
+	ctx->atr_len = 0;
+	ctx->protocol = 0;
+	ctx->t1_ifsc = DEFAULT_T1_IFSC;
+	ctx->t1_edc_crc = 0;
+	ctx->t1_seq = 0;
+	memset(&ctx->last_rx_time, 0, sizeof(ctx->last_rx_time));
+}
+
+static void px4_ifd_invalidate_reader(struct reader_context *ctx)
+{
+	if (!ctx)
+		return;
+
+	if (ctx->fd >= 0)
+		close(ctx->fd);
+
+	ctx->fd = -1;
+	px4_ifd_clear_reader_state(ctx);
+}
+
 /* Parse T=1 parameters from ATR: IFSC (from TA3 for T=1 interface)
  * and EDC type (from TCi for T=1 interface, bit0=1 means CRC). */
 static void px4_ifd_parse_t1_atr(struct reader_context *ctx)
@@ -178,6 +218,14 @@ static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
 				if (total_len > 0)
 					break;
 				return IFD_RESPONSE_TIMEOUT;
+			}
+
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
 			}
 
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s", strerror(errno));
@@ -307,7 +355,7 @@ static void px4_ifd_guard_interval(struct reader_context *ctx)
 		   + (now.tv_usec - ctx->last_rx_time.tv_usec) / 1000L;
 
 	if (elapsed_ms < T1_GUARD_INTERVAL_MS)
-		usleep((useconds_t)((T1_GUARD_INTERVAL_MS - elapsed_ms) * 1000L));
+		usleep((T1_GUARD_INTERVAL_MS - elapsed_ms) * 1000L);
 }
 
 /* Send a raw frame to the card device. */
@@ -325,6 +373,13 @@ static RESPONSECODE px4_ifd_send_frame(struct reader_context *ctx,
 	tx.length = (unsigned char)len;
 
 	if (ioctl(ctx->fd, PX4CARD_WRITE, &tx) < 0) {
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_WRITE failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_COMMUNICATION_ERROR;
+		}
 		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
@@ -341,6 +396,13 @@ static RESPONSECODE px4_ifd_wait_rx_ready(struct reader_context *ctx,
 	while (elapsed < timeout_ms) {
 		ready = 0;
 		if (ioctl(ctx->fd, PX4CARD_READ_READY, &ready) < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ_READY failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
+			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
 			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
@@ -383,6 +445,13 @@ static RESPONSECODE px4_ifd_recv_t1_frame(struct reader_context *ctx,
 				if (total > 0)
 					break;
 				return IFD_RESPONSE_TIMEOUT;
+			}
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
 			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s",
 			     strerror(errno));
@@ -616,6 +685,156 @@ static RESPONSECODE px4_ifd_t1_transmit(struct reader_context *ctx,
 	return IFD_SUCCESS;
 }
 
+/* VID/PID to card device prefix mapping (mirrors px4_usb.c probe table) */
+struct px4_vid_pid_entry {
+	unsigned int vid;
+	unsigned int pid;
+	const char *card_prefix;
+};
+
+static const struct px4_vid_pid_entry px4_vid_pid_table[] = {
+	/* PX4/PX5 series (--> px4card) */
+	{ 0x0511, 0x083f, "px4card"      }, /* PX-W3U4     */
+	{ 0x0511, 0x084a, "px4card"      }, /* PX-Q3U4     */
+	{ 0x0511, 0x023f, "px4card"      }, /* PX-W3PE4    */
+	{ 0x0511, 0x024a, "px4card"      }, /* PX-Q3PE4    */
+	{ 0x0511, 0x073f, "px4card"      }, /* PX-W3PE5    */
+	{ 0x0511, 0x074a, "px4card"      }, /* PX-Q3PE5    */
+	/* PX-MLT5 series (--> pxmlt5card) */
+	{ 0x0511, 0x084e, "pxmlt5card"   }, /* PX-MLT5U    */
+	{ 0x0511, 0x024e, "pxmlt5card"   }, /* PX-MLT5PE   */
+	/* PX-MLT8 series (--> pxmlt8card) */
+	{ 0x0511, 0x0253, "pxmlt8card"   }, /* PX-MLT8PE  */
+	/* DTV02A-1T1S-U/N (--> isdb2056card) */
+	{ 0x0511, 0x004b, "isdb2056card" }, /* ISDB2056    */
+	{ 0x0511, 0x084b, "isdb2056card" }, /* ISDB2056N   */
+	/* DTV02A-4TS-P (--> isdb6014card) */
+	{ 0x0511, 0x0254, "isdb6014card" }, /* ISDB6014    */
+	/* PX-M1UR (--> pxm1urcard) */
+	{ 0x0511, 0x0854, "pxm1urcard"   }, /* PX-M1UR     */
+	/* PX-S1UR (--> pxs1urcard) */
+	{ 0x0511, 0x0855, "pxs1urcard"   }, /* PX-S1UR     */
+	/* DTV03A-1TU (--> isdbt2071card) */
+	{ 0x0511, 0x0052, "isdbt2071card" }, /* ISDBT2071   */
+	{ 0, 0, NULL }
+};
+
+static const char *px4_vid_pid_lookup(unsigned int vid, unsigned int pid)
+{
+	const struct px4_vid_pid_entry *e;
+
+	for (e = px4_vid_pid_table; e->card_prefix != NULL; e++) {
+		if (e->vid == vid && e->pid == pid)
+			return e->card_prefix;
+	}
+	return NULL;
+}
+
+/* Known card device name prefixes, in probe order (for "auto" mode) */
+static const char * const px4_card_prefixes[] = {
+	"px4card",
+	"pxmlt5card",
+	"pxmlt8card",
+	"isdb2056card",
+	"isdb6014card",
+	"pxm1urcard",
+	"pxs1urcard",
+	"isdbt2071card",
+	NULL
+};
+/* Try indices 0..PX4_CARD_AUTO_MAX_IDX-1 for each prefix */
+#define PX4_CARD_AUTO_MAX_IDX 12
+
+/*
+ * Open /dev/<prefix><N> by scanning indices and return first openable fd.
+ * On success, stores the selected path in ctx->device_name.
+ */
+static int px4_ifd_open_by_prefix(struct reader_context *ctx, const char *prefix)
+{
+	char path[256];
+	int fd;
+	int idx;
+
+	for (idx = 0; idx < PX4_CARD_AUTO_MAX_IDX; idx++) {
+		snprintf(path, sizeof(path), "/dev/%s%d", prefix, idx);
+		fd = open(path, O_RDWR | O_NOCTTY);
+		if (fd >= 0) {
+			snprintf(ctx->device_name, sizeof(ctx->device_name), "%s", path);
+			return fd;
+		}
+	}
+
+	return -1;
+}
+
+/*
+ * px4_ifd_open_by_usb_path
+ * Parse the "usb:VVVV/PPPP" DeviceName supplied by pcscd when
+ * using an Info.plist bundle. Map VID/PID to a card device prefix and open
+ * the first existing /dev/<prefix><N>.
+ *
+ * NOTE: N is bInterfaceNumber (CCID interface index), not card device index.
+ * For this driver, it is not used for device node selection.
+ * Returns a valid fd on success, -1 on error.
+ */
+static int px4_ifd_open_by_usb_path(struct reader_context *ctx,
+				     const char *device_name)
+{
+	unsigned int vid, pid;
+	const char *prefix;
+	int fd;
+
+	if (sscanf(device_name, "usb:%04x/%04x",
+		   &vid, &pid) != 2) {
+		Log2(PCSC_LOG_ERROR,
+		     "Failed to parse USB device name: %s", device_name);
+		return -1;
+	}
+
+	prefix = px4_vid_pid_lookup(vid, pid);
+	if (!prefix) {
+		Log3(PCSC_LOG_ERROR,
+		     "No card device mapping for VID=%04x PID=%04x", vid, pid);
+		return -1;
+	}
+
+	fd = px4_ifd_open_by_prefix(ctx, prefix);
+	if (fd < 0) {
+		Log4(PCSC_LOG_ERROR,
+		     "No available device for VID=%04x PID=%04x (prefix=%s)",
+		     vid, pid, prefix);
+		return -1;
+	}
+
+	Log4(PCSC_LOG_INFO,
+	     "USB %04x:%04x mapped to %s", vid, pid, ctx->device_name);
+	return fd;
+}
+
+/*
+ * px4_ifd_auto_open
+ * Scan /dev/<prefix><N> for all known device types and open the first one
+ * that exists and is accessible. The opened path is stored in ctx->device_name.
+ * Returns a valid fd on success, -1 if no device was found.
+ */
+static int px4_ifd_auto_open(struct reader_context *ctx)
+{
+	const char * const *prefix;
+	int fd;
+
+	for (prefix = px4_card_prefixes; *prefix != NULL; prefix++) {
+		fd = px4_ifd_open_by_prefix(ctx, *prefix);
+		if (fd >= 0) {
+			Log2(PCSC_LOG_INFO,
+			     "Auto-detected device: %s", ctx->device_name);
+			return fd;
+		}
+	}
+
+	Log1(PCSC_LOG_ERROR, "Auto-detect: no PX4 card device found in /dev/");
+	return -1;
+}
+
 /*
  * IFDHCreateChannel
  * Opens a communication channel to the device
@@ -649,15 +868,31 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 	ctx->fd = -1;
 	ctx->t1_ifsc = DEFAULT_T1_IFSC;
 
-	/* Open device */
-	ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
-	if (ctx->fd < 0) {
-		Log1(PCSC_LOG_ERROR, "Failed to open device");
-		return IFD_COMMUNICATION_ERROR;
+	/*
+	 * Determine how to open the device:
+	 *  "usb:VVVV/PPPP..." — Info.plist bundle mode (VID/PID lookup)
+	 *  "/dev/null"        — reader.conf auto scan mode
+	 *  anything else                  — explicit device path
+	 */
+	if (strncmp(DeviceName, "usb:", 4) == 0) {
+		ctx->fd = px4_ifd_open_by_usb_path(ctx, DeviceName);
+		if (ctx->fd < 0)
+			return IFD_COMMUNICATION_ERROR;
+	} else if (strcmp(DeviceName, "/dev/null") == 0) {
+		ctx->fd = px4_ifd_auto_open(ctx);
+		if (ctx->fd < 0)
+			return IFD_COMMUNICATION_ERROR;
+	} else {
+		ctx->fd = open(DeviceName, O_RDWR | O_NOCTTY);
+		if (ctx->fd < 0) {
+			Log2(PCSC_LOG_ERROR, "Failed to open device: %s",
+			     strerror(errno));
+			return IFD_COMMUNICATION_ERROR;
+		}
+		snprintf(ctx->device_name, sizeof(ctx->device_name),
+			 "%s", DeviceName);
 	}
-
-	strncpy(ctx->device_name, DeviceName, sizeof(ctx->device_name) - 1);
-	Log1(PCSC_LOG_INFO, "Device opened");
+	Log2(PCSC_LOG_INFO, "Device opened: %s", ctx->device_name);
 
 	return IFD_SUCCESS;
 }
@@ -672,17 +907,13 @@ RESPONSECODE IFDHCloseChannel(DWORD Lun)
 
 	Log1(PCSC_LOG_INFO, "IFDHCloseChannel");
 
-	if (!ctx || ctx->fd < 0)
+	if (!ctx)
 		return IFD_COMMUNICATION_ERROR;
 
-	close(ctx->fd);
-	ctx->fd = -1;
-	ctx->atr_len = 0;
-	ctx->protocol = 0;
-	ctx->t1_ifsc = DEFAULT_T1_IFSC;
-	ctx->t1_edc_crc = 0;
-	ctx->t1_seq = 0;
-	memset(&ctx->last_rx_time, 0, sizeof(ctx->last_rx_time));
+	if (ctx->fd < 0)
+		return IFD_SUCCESS;
+
+	px4_ifd_invalidate_reader(ctx);
 
 	return IFD_SUCCESS;
 }
@@ -838,6 +1069,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Reset card */
 		ret = ioctl(ctx->fd, PX4CARD_RESET);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_RESET failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_RESET failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -845,6 +1083,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Get ATR */
 		ret = ioctl(ctx->fd, PX4CARD_GET_ATR, &atr_data);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_GET_ATR failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_GET_ATR failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -878,6 +1123,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		const int baurate_19200 = PX4CARD_BAUDRATE_19200;
 		ret = ioctl(ctx->fd, PX4CARD_SET_BAUDRATE, &baurate_19200);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_SET_BAUDRATE failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_SET_BAUDRATE failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -970,6 +1222,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 
 	ret = ioctl(ctx->fd, PX4CARD_WRITE, &tx_data);
 	if (ret < 0) {
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_WRITE failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_COMMUNICATION_ERROR;
+		}
 		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
@@ -978,6 +1237,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		ready = 0;
 		ret = ioctl(ctx->fd, PX4CARD_READ_READY, &ready);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ_READY failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
+			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
 			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
@@ -1040,12 +1306,23 @@ RESPONSECODE IFDHICCPresence(DWORD Lun)
 	int detected = 0;
 	int ret;
 
-	if (!ctx || ctx->fd < 0)
+	if (!ctx)
 		return IFD_COMMUNICATION_ERROR;
+
+	if (ctx->fd < 0)
+		return IFD_ICC_NOT_PRESENT;
 
 	ret = ioctl(ctx->fd, PX4CARD_DETECT, &detected);
 	if (ret < 0) {
-		Log1(PCSC_LOG_ERROR, "PX4CARD_DETECT failed");
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_DETECT failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_ICC_NOT_PRESENT;
+		}
+
+		Log2(PCSC_LOG_ERROR, "PX4CARD_DETECT failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
 

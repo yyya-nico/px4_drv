@@ -104,6 +104,7 @@ Linux版では、スマートカードを標準的なPC/SCインターフェー�
 - `/dev/px4card*` デバイスノード経由でスマートカードにアクセス可能
 - `pcscd`（PC/SC daemon）対応により、標準的なスマートカードツールが利用可能
 - チューナー機能とは独立して動作
+- プラグアンドプレイに対応
 
 ### 使い方
 
@@ -114,9 +115,6 @@ Linux版では、スマートカードを標準的なPC/SCインターフェー�
 cd userland/ifd-px4
 make
 sudo make install
-
-# pcscd設定のインストール
-sudo install -m 644 px4card.conf /etc/reader.conf.d/
 
 # pcscdの再起動
 sudo systemctl restart pcscd
