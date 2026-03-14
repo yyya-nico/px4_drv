@@ -773,8 +773,6 @@ static int px4_ifd_open_by_prefix(struct reader_context *ctx, const char *prefix
  * using an Info.plist bundle. Map VID/PID to a card device prefix and open
  * the first existing /dev/<prefix><N>.
  *
- * NOTE: N is bInterfaceNumber (CCID interface index), not card device index.
- * For this driver, it is not used for device node selection.
  * Returns a valid fd on success, -1 on error.
  */
 static int px4_ifd_open_by_usb_path(struct reader_context *ctx,
