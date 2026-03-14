@@ -84,6 +84,46 @@ static struct reader_context *get_reader(DWORD Lun)
 	return &readers[idx];
 }
 
+static int px4_ifd_is_device_gone_errno(int err)
+{
+	switch (err) {
+	case ENODEV:
+	case ENXIO:
+	case ENOENT:
+	case EBADF:
+	case EPIPE:
+	case ECONNRESET:
+#ifdef ESHUTDOWN
+	case ESHUTDOWN:
+#endif
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static void px4_ifd_clear_reader_state(struct reader_context *ctx)
+{
+	ctx->atr_len = 0;
+	ctx->protocol = 0;
+	ctx->t1_ifsc = DEFAULT_T1_IFSC;
+	ctx->t1_edc_crc = 0;
+	ctx->t1_seq = 0;
+	memset(&ctx->last_rx_time, 0, sizeof(ctx->last_rx_time));
+}
+
+static void px4_ifd_invalidate_reader(struct reader_context *ctx)
+{
+	if (!ctx)
+		return;
+
+	if (ctx->fd >= 0)
+		close(ctx->fd);
+
+	ctx->fd = -1;
+	px4_ifd_clear_reader_state(ctx);
+}
+
 /* Parse T=1 parameters from ATR: IFSC (from TA3 for T=1 interface)
  * and EDC type (from TCi for T=1 interface, bit0=1 means CRC). */
 static void px4_ifd_parse_t1_atr(struct reader_context *ctx)
@@ -178,6 +218,14 @@ static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
 				if (total_len > 0)
 					break;
 				return IFD_RESPONSE_TIMEOUT;
+			}
+
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
 			}
 
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s", strerror(errno));
@@ -325,6 +373,13 @@ static RESPONSECODE px4_ifd_send_frame(struct reader_context *ctx,
 	tx.length = (unsigned char)len;
 
 	if (ioctl(ctx->fd, PX4CARD_WRITE, &tx) < 0) {
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_WRITE failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_COMMUNICATION_ERROR;
+		}
 		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
@@ -341,6 +396,13 @@ static RESPONSECODE px4_ifd_wait_rx_ready(struct reader_context *ctx,
 	while (elapsed < timeout_ms) {
 		ready = 0;
 		if (ioctl(ctx->fd, PX4CARD_READ_READY, &ready) < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ_READY failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
+			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
 			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
@@ -383,6 +445,13 @@ static RESPONSECODE px4_ifd_recv_t1_frame(struct reader_context *ctx,
 				if (total > 0)
 					break;
 				return IFD_RESPONSE_TIMEOUT;
+			}
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
 			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ failed: %s",
 			     strerror(errno));
@@ -839,17 +908,13 @@ RESPONSECODE IFDHCloseChannel(DWORD Lun)
 
 	Log1(PCSC_LOG_INFO, "IFDHCloseChannel");
 
-	if (!ctx || ctx->fd < 0)
+	if (!ctx)
 		return IFD_COMMUNICATION_ERROR;
 
-	close(ctx->fd);
-	ctx->fd = -1;
-	ctx->atr_len = 0;
-	ctx->protocol = 0;
-	ctx->t1_ifsc = DEFAULT_T1_IFSC;
-	ctx->t1_edc_crc = 0;
-	ctx->t1_seq = 0;
-	memset(&ctx->last_rx_time, 0, sizeof(ctx->last_rx_time));
+	if (ctx->fd < 0)
+		return IFD_SUCCESS;
+
+	px4_ifd_invalidate_reader(ctx);
 
 	return IFD_SUCCESS;
 }
@@ -1005,6 +1070,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Reset card */
 		ret = ioctl(ctx->fd, PX4CARD_RESET);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_RESET failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_RESET failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -1012,6 +1084,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		/* Get ATR */
 		ret = ioctl(ctx->fd, PX4CARD_GET_ATR, &atr_data);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_GET_ATR failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_GET_ATR failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -1045,6 +1124,13 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		const int baurate_19200 = PX4CARD_BAUDRATE_19200;
 		ret = ioctl(ctx->fd, PX4CARD_SET_BAUDRATE, &baurate_19200);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_SET_BAUDRATE failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_ICC_NOT_PRESENT;
+			}
 			Log1(PCSC_LOG_ERROR, "PX4CARD_SET_BAUDRATE failed");
 			return IFD_COMMUNICATION_ERROR;
 		}
@@ -1137,6 +1223,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 
 	ret = ioctl(ctx->fd, PX4CARD_WRITE, &tx_data);
 	if (ret < 0) {
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_WRITE failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_COMMUNICATION_ERROR;
+		}
 		Log2(PCSC_LOG_ERROR, "PX4CARD_WRITE failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
@@ -1145,6 +1238,13 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		ready = 0;
 		ret = ioctl(ctx->fd, PX4CARD_READ_READY, &ready);
 		if (ret < 0) {
+			if (px4_ifd_is_device_gone_errno(errno)) {
+				Log2(PCSC_LOG_INFO,
+				     "PX4CARD_READ_READY failed after device removal: %s",
+				     strerror(errno));
+				px4_ifd_invalidate_reader(ctx);
+				return IFD_COMMUNICATION_ERROR;
+			}
 			Log2(PCSC_LOG_ERROR, "PX4CARD_READ_READY failed: %s",
 			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
@@ -1207,12 +1307,23 @@ RESPONSECODE IFDHICCPresence(DWORD Lun)
 	int detected = 0;
 	int ret;
 
-	if (!ctx || ctx->fd < 0)
+	if (!ctx)
 		return IFD_COMMUNICATION_ERROR;
+
+	if (ctx->fd < 0)
+		return IFD_ICC_NOT_PRESENT;
 
 	ret = ioctl(ctx->fd, PX4CARD_DETECT, &detected);
 	if (ret < 0) {
-		Log1(PCSC_LOG_ERROR, "PX4CARD_DETECT failed");
+		if (px4_ifd_is_device_gone_errno(errno)) {
+			Log2(PCSC_LOG_INFO,
+			     "PX4CARD_DETECT failed after device removal: %s",
+			     strerror(errno));
+			px4_ifd_invalidate_reader(ctx);
+			return IFD_ICC_NOT_PRESENT;
+		}
+
+		Log2(PCSC_LOG_ERROR, "PX4CARD_DETECT failed: %s", strerror(errno));
 		return IFD_COMMUNICATION_ERROR;
 	}
 
