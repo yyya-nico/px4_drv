@@ -616,7 +616,53 @@ static RESPONSECODE px4_ifd_t1_transmit(struct reader_context *ctx,
 	return IFD_SUCCESS;
 }
 
-/* Known card device name prefixes, in probe order */
+/* VID/PID to card device prefix mapping (mirrors px4_usb.c probe table) */
+struct px4_vid_pid_entry {
+	unsigned int vid;
+	unsigned int pid;
+	const char *card_prefix;
+};
+
+static const struct px4_vid_pid_entry px4_vid_pid_table[] = {
+	/* PX4/PX5 series (--> px4card) */
+	{ 0x0511, 0x083f, "px4card"      }, /* PX-W3U4     */
+	{ 0x0511, 0x084a, "px4card"      }, /* PX-Q3U4     */
+	{ 0x0511, 0x023f, "px4card"      }, /* PX-W3PE4    */
+	{ 0x0511, 0x024a, "px4card"      }, /* PX-Q3PE4    */
+	{ 0x0511, 0x073f, "px4card"      }, /* PX-W3PE5    */
+	{ 0x0511, 0x074a, "px4card"      }, /* PX-Q3PE5    */
+	/* PX-MLT5 series (--> pxmlt5card) */
+	{ 0x0511, 0x084e, "pxmlt5card"   }, /* PX-MLT5U    */
+	{ 0x0511, 0x024e, "pxmlt5card"   }, /* PX-MLT5PE   */
+	/* PX-MLT8 series (--> pxmlt8card) */
+	{ 0x0511, 0x0252, "pxmlt8card"   }, /* PX-MLT8PE3  */
+	{ 0x0511, 0x0253, "pxmlt8card"   }, /* PX-MLT8PE5  */
+	/* DTV02A-1T1S-U/N (--> isdb2056card) */
+	{ 0x0511, 0x004b, "isdb2056card" }, /* ISDB2056    */
+	{ 0x0511, 0x084b, "isdb2056card" }, /* ISDB2056N   */
+	/* DTV02A-4TS-P (--> isdb6014card) */
+	{ 0x0511, 0x0254, "isdb6014card" }, /* ISDB6014    */
+	/* PX-M1UR (--> pxm1urcard) */
+	{ 0x0511, 0x0854, "pxm1urcard"   }, /* PX-M1UR     */
+	/* PX-S1UR (--> pxs1urcard) */
+	{ 0x0511, 0x0855, "pxs1urcard"   }, /* PX-S1UR     */
+	/* DTV03A-1TU (--> isdbt2071card) */
+	{ 0x0511, 0x0052, "isdbt2071card" }, /* ISDBT2071   */
+	{ 0, 0, NULL }
+};
+
+static const char *px4_vid_pid_lookup(unsigned int vid, unsigned int pid)
+{
+	const struct px4_vid_pid_entry *e;
+
+	for (e = px4_vid_pid_table; e->card_prefix != NULL; e++) {
+		if (e->vid == vid && e->pid == pid)
+			return e->card_prefix;
+	}
+	return NULL;
+}
+
+/* Known card device name prefixes, in probe order (for "auto" mode) */
 static const char * const px4_card_prefixes[] = {
 	"px4card",
 	"pxmlt5card",
@@ -629,7 +675,73 @@ static const char * const px4_card_prefixes[] = {
 	NULL
 };
 /* Try indices 0..PX4_CARD_AUTO_MAX_IDX-1 for each prefix */
-#define PX4_CARD_AUTO_MAX_IDX 4
+#define PX4_CARD_AUTO_MAX_IDX 12
+
+/*
+ * Open /dev/<prefix><N> by scanning indices and return first openable fd.
+ * On success, stores the selected path in ctx->device_name.
+ */
+static int px4_ifd_open_by_prefix(struct reader_context *ctx, const char *prefix)
+{
+	char path[256];
+	int fd;
+	int idx;
+
+	for (idx = 0; idx < PX4_CARD_AUTO_MAX_IDX; idx++) {
+		snprintf(path, sizeof(path), "/dev/%s%d", prefix, idx);
+		fd = open(path, O_RDWR | O_NOCTTY);
+		if (fd >= 0) {
+			snprintf(ctx->device_name, sizeof(ctx->device_name), "%s", path);
+			return fd;
+		}
+	}
+
+	return -1;
+}
+
+/*
+ * px4_ifd_open_by_usb_path
+ * Parse the "usb:VVVV/PPPP" DeviceName supplied by pcscd when
+ * using an Info.plist bundle. Map VID/PID to a card device prefix and open
+ * the first existing /dev/<prefix><N>.
+ *
+ * NOTE: N is bInterfaceNumber (CCID interface index), not card device index.
+ * For this driver, it is not used for device node selection.
+ * Returns a valid fd on success, -1 on error.
+ */
+static int px4_ifd_open_by_usb_path(struct reader_context *ctx,
+				     const char *device_name)
+{
+	unsigned int vid, pid;
+	const char *prefix;
+	int fd;
+
+	if (sscanf(device_name, "usb:%04x/%04x",
+		   &vid, &pid) != 2) {
+		Log2(PCSC_LOG_ERROR,
+		     "Failed to parse USB device name: %s", device_name);
+		return -1;
+	}
+
+	prefix = px4_vid_pid_lookup(vid, pid);
+	if (!prefix) {
+		Log3(PCSC_LOG_ERROR,
+		     "No card device mapping for VID=%04x PID=%04x", vid, pid);
+		return -1;
+	}
+
+	fd = px4_ifd_open_by_prefix(ctx, prefix);
+	if (fd < 0) {
+		Log4(PCSC_LOG_ERROR,
+		     "No available device for VID=%04x PID=%04x (prefix=%s)",
+		     vid, pid, prefix);
+		return -1;
+	}
+
+	Log4(PCSC_LOG_INFO,
+	     "USB %04x:%04x mapped to %s", vid, pid, ctx->device_name);
+	return fd;
+}
 
 /*
  * px4_ifd_auto_open
@@ -640,22 +752,14 @@ static const char * const px4_card_prefixes[] = {
 static int px4_ifd_auto_open(struct reader_context *ctx)
 {
 	const char * const *prefix;
-	char path[256];
 	int fd;
-	int idx;
 
 	for (prefix = px4_card_prefixes; *prefix != NULL; prefix++) {
-		for (idx = 0; idx < PX4_CARD_AUTO_MAX_IDX; idx++) {
-			snprintf(path, sizeof(path), "/dev/%s%d", *prefix, idx);
-			fd = open(path, O_RDWR | O_NOCTTY);
-			if (fd >= 0) {
-				snprintf(ctx->device_name,
-					 sizeof(ctx->device_name),
-					 "%s", path);
-				Log2(PCSC_LOG_INFO,
-				     "Auto-detected device: %s", path);
-				return fd;
-			}
+		fd = px4_ifd_open_by_prefix(ctx, *prefix);
+		if (fd >= 0) {
+			Log2(PCSC_LOG_INFO,
+			     "Auto-detected device: %s", ctx->device_name);
+			return fd;
 		}
 	}
 
@@ -696,8 +800,17 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 	ctx->fd = -1;
 	ctx->t1_ifsc = DEFAULT_T1_IFSC;
 
-	/* Open device — DeviceName="/dev/null" triggers automatic discovery */
-	if (strcmp(DeviceName, "/dev/null") == 0) {
+	/*
+	 * Determine how to open the device:
+	 *  "usb:VVVV/PPPP..." — Info.plist bundle mode (VID/PID lookup)
+	 *  "/dev/null"        — reader.conf auto scan mode
+	 *  anything else                  — explicit device path
+	 */
+	if (strncmp(DeviceName, "usb:", 4) == 0) {
+		ctx->fd = px4_ifd_open_by_usb_path(ctx, DeviceName);
+		if (ctx->fd < 0)
+			return IFD_COMMUNICATION_ERROR;
+	} else if (strcmp(DeviceName, "/dev/null") == 0) {
 		ctx->fd = px4_ifd_auto_open(ctx);
 		if (ctx->fd < 0)
 			return IFD_COMMUNICATION_ERROR;
@@ -708,8 +821,8 @@ RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 			     strerror(errno));
 			return IFD_COMMUNICATION_ERROR;
 		}
-		strncpy(ctx->device_name, DeviceName,
-			sizeof(ctx->device_name) - 1);
+		snprintf(ctx->device_name, sizeof(ctx->device_name),
+			 "%s", DeviceName);
 	}
 	Log2(PCSC_LOG_INFO, "Device opened: %s", ctx->device_name);
 
