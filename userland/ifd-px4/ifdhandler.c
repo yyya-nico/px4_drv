@@ -307,7 +307,7 @@ static void px4_ifd_guard_interval(struct reader_context *ctx)
 		   + (now.tv_usec - ctx->last_rx_time.tv_usec) / 1000L;
 
 	if (elapsed_ms < T1_GUARD_INTERVAL_MS)
-		usleep((useconds_t)((T1_GUARD_INTERVAL_MS - elapsed_ms) * 1000L));
+		usleep(((T1_GUARD_INTERVAL_MS - elapsed_ms) * 1000L));
 }
 
 /* Send a raw frame to the card device. */
