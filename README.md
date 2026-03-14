@@ -1,5 +1,10 @@
 # px4_drv - Unofficial Linux / Windows (WinUSB) driver for PLEX PX4/PX5/PX-MLT series ISDB-T/S receivers
 
+[tsukumijima/px4_drv](https://github.com/tsukumijima/px4_drv) にカードリーダー取扱い機能を足したフォークです。  
+動作安定性は検証中です。
+
+---
+
 PLEX や e-Better から発売された各種 ISDB-T/S チューナー向けの chardev 版非公式 Linux ドライバ / Windows (WinUSB) ドライバです。  
 PLEX 社の [Webサイト](http://plex-net.co.jp) にて配布されている公式ドライバとは**別物**です。
 
