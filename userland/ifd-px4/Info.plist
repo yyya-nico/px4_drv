@@ -2,29 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>English</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundlePackageType</key>
-    <string>BNDL</string>
-    <key>CFBundleSignature</key>
-    <string>????</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.0</string>
     <key>ifdCapabilities</key>
     <string>0x00000000</string>
-    <key>ifdProtocolSupport</key>
-    <string>0x00000001</string>
-    <key>ifdVersionNumber</key>
-    <string>0x00000001</string>
-
     <key>CFBundleExecutable</key>
     <string>libpx4ifd.so</string>
-
     <key>ifdManufacturerString</key>
     <string>px4_drv Contributors</string>
-
     <key>ifdProductString</key>
     <string>PX4 Smart Card Reader Driver</string>
 
@@ -67,21 +50,21 @@
     </array>
     <key>ifdFriendlyName</key>
     <array>
-        <string>PX-W3U4 Smart Card Reader</string>
-        <string>PX-Q3U4 Smart Card Reader</string>
-        <string>PX-W3PE4 Smart Card Reader</string>
-        <string>PX-Q3PE4 Smart Card Reader</string>
-        <string>PX-W3PE5 Smart Card Reader</string>
-        <string>PX-Q3PE5 Smart Card Reader</string>
-        <string>PX-MLT5U Smart Card Reader</string>
-        <string>PX-MLT5PE Smart Card Reader</string>
-        <string>PX-MLT8PE Smart Card Reader</string>
-        <string>DTV02A-1T1S-U Smart Card Reader</string>
-        <string>DTV02A-1T1S-U(N) Smart Card Reader</string>
-        <string>DTV02A-4TS-P Smart Card Reader</string>
-        <string>PX-M1UR Smart Card Reader</string>
-        <string>PX-S1UR Smart Card Reader</string>
-        <string>DTV03A-1TU Smart Card Reader</string>
+        <string>PLEX PX-W3U4 Smart Card Reader</string>
+        <string>PLEX PX-Q3U4 Smart Card Reader</string>
+        <string>PLEX PX-W3PE4 Smart Card Reader</string>
+        <string>PLEX PX-Q3PE4 Smart Card Reader</string>
+        <string>PLEX PX-W3PE5 Smart Card Reader</string>
+        <string>PLEX PX-Q3PE5 Smart Card Reader</string>
+        <string>PLEX PX-MLT5U Smart Card Reader</string>
+        <string>PLEX PX-MLT5PE Smart Card Reader</string>
+        <string>PLEX PX-MLT8PE Smart Card Reader</string>
+        <string>e-Better DTV02A-1T1S-U Smart Card Reader</string>
+        <string>e-Better DTV02A-1T1S-U(N) Smart Card Reader</string>
+        <string>e-Better DTV02A-4TS-P Smart Card Reader</string>
+        <string>PLEX PX-M1UR Smart Card Reader</string>
+        <string>PLEX PX-S1UR Smart Card Reader</string>
+        <string>e-Better DTV03A-1TU Smart Card Reader</string>
     </array>
 </dict>
 </plist>
