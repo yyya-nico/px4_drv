@@ -1,7 +1,13 @@
 # px4_drv - Unofficial Linux / Windows (WinUSB) driver for PLEX PX4/PX5/PX-MLT series ISDB-T/S receivers
 
 [tsukumijima/px4_drv](https://github.com/tsukumijima/px4_drv) にカードリーダー取扱い機能を足したフォークです。  
-動作安定性は検証中です。
+以下の機種で動作確認がてきています。
+- PX-W3U4 (まずはカード認識まで)
+- DTV02A-1T1S-U (まずはカード認識まで)
+- PX-MLT8PE (カード認識〜8チャンネル同時受信まで TSドロップなし)
+
+上記以外の対応デバイスで動作を確認できた際は、Issuesに投稿してもらえると他の方の参考になります。  
+確認でき次第ここに書き足す予定です。
 
 ---
 
