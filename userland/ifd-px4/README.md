@@ -111,7 +111,7 @@ sudo cat /dev/px4card0 | hexdump -C
 cat /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
 
 # IFDハンドラーのインストール確認
-ls -l /usr/lib/pcsc/drivers/ifd-px4/Contents/Linux/libpx4ifd.so
+ls -l /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
 
 # pcscdをデバッグモードで起動
 sudo pcscd -f -d -a
