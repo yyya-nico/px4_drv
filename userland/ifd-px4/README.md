@@ -136,9 +136,9 @@ sudo pcscd -f -d -a
   [libpx4ifd.so] (このディレクトリ)
          ↓ ioctl
    [px4_card.ko] (カーネルドライバ)
-         ↓ UART
+         ↓ USB
    [IT930x ブリッジ]
-         ↓
+         ↓ UART
    [スマートカード]
 ```
 
