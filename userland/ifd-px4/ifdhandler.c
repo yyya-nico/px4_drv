@@ -71,9 +71,14 @@ static RESPONSECODE px4_ifd_stop_polling(DWORD Lun)
 }
 
 /* Helper functions */
+/*
+ * The Lun is 0xRRRRSSSS: reader number in the high 16 bits, slot number in
+ * the low 16 bits (see PCSC/ifdhandler.h). We expose one slot per reader,
+ * so the reader number is what selects the context.
+ */
 static int get_reader_index(DWORD Lun)
 {
-	return (int)(Lun & 0xFFFF);
+	return (int)((Lun >> 16) & 0xFFFF);
 }
 
 static struct reader_context *get_reader(DWORD Lun)
@@ -943,14 +948,17 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 	case TAG_IFD_SIMULTANEOUS_ACCESS:
 		if (*Length < 1)
 			return IFD_ERROR_INSUFFICIENT_BUFFER;
-		*Value = 1; /* One slot only */
+		/* Number of *readers* this driver can manage simultaneously,
+		 * not the number of slots per reader. Per-reader state lives
+		 * in readers[], so we can drive MAX_READERS of them. */
+		*Value = MAX_READERS;
 		*Length = 1;
 		break;
 
 	case TAG_IFD_SLOTS_NUMBER:
 		if (*Length < 1)
 			return IFD_ERROR_INSUFFICIENT_BUFFER;
-		*Value = 1; /* One slot */
+		*Value = 1; /* One slot per reader */
 		*Length = 1;
 		break;
 
