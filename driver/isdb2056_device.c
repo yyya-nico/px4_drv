@@ -1185,6 +1185,9 @@ int isdb2056_device_init(struct isdb2056_device *isdb2056, struct device *dev,
 fail_chrdev:
 
 fail_device:
+	if (isdb2056->card_ctx.dev)
+		px4_card_unregister(&isdb2056->card_ctx);
+
 	it930x_term(it930x);
 
 fail_bridge:

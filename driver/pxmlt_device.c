@@ -1150,6 +1150,9 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 fail_chrdev:
 
 fail_device:
+	if (pxmlt->card_ctx.dev)
+		px4_card_unregister(&pxmlt->card_ctx);
+
 	it930x_term(it930x);
 
 fail_bridge:
