@@ -11,7 +11,8 @@
 上記以外の対応デバイスで動作を確認できた際は、Issuesに投稿してもらえると他の方の参考になります。  
 確認でき次第ここに書き足す予定です。
 
-[PR #4](https://github.com/yyya-nico/px4_drv/pull/4) にて複数デバイス接続時でもそれぞれのカードリーダーが使えるようになりました(Thanks [daig0rian](https://github.com/daig0rian))。
+[PR #4](https://github.com/yyya-nico/px4_drv/pull/4) にて複数デバイス接続時でもそれぞれのカードリーダーが使えるようになりました(Thanks [daig0rian](https://github.com/daig0rian))。  
+[PR #6](https://github.com/yyya-nico/px4_drv/pull/6) にてカードコンテキストのリークとモジュール再ロード失敗の修正が行われました(Thanks [MusiQ-DA](https://github.com/MusiQ-DA))。
 
 ---
 
