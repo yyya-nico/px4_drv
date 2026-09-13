@@ -1434,6 +1434,9 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 fail_chrdev:
 
 fail_device:
+	if (px4->card_ctx.dev)
+		px4_card_unregister(&px4->card_ctx);
+
 	if (px4->mldev)
 		px4_mldev_remove(px4->mldev, px4);
 

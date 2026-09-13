@@ -1130,6 +1130,9 @@ int m1ur_device_init(struct m1ur_device *m1ur, struct device *dev,
 fail_chrdev:
 
 fail_device:
+	if (m1ur->card_ctx.dev)
+		px4_card_unregister(&m1ur->card_ctx);
+
 	it930x_term(it930x);
 
 fail_bridge:

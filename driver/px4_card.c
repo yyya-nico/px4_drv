@@ -618,6 +618,8 @@ int px4_card_register(struct px4_card_context *card_ctx,
 fail_device:
 	cdev_del(&card_ctx->cdev);
 fail_cdev:
+	/* Registration failed; callers must not unregister this context. */
+	card_ctx->dev = NULL;
 	mutex_lock(&ctx_group->lock);
 	set_bit(id, (unsigned long *)ctx_group->minor_table);
 	kref_put(&ctx_group->kref, px4_card_context_group_release);
@@ -630,7 +632,7 @@ void px4_card_unregister(struct px4_card_context *card_ctx)
 {
 	struct px4_card_context_group *ctx_group;
 
-	if (!card_ctx)
+	if (!card_ctx || !card_ctx->dev)
 		return;
 
 	ctx_group = card_ctx->parent;
