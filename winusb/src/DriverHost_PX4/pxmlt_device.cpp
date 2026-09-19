@@ -65,10 +65,6 @@ PxMltDevice::PxMltDevice(const std::wstring &path, const px4::DeviceDefinition &
 		receiver_num_ = 4;
 		break;
 
-	case 0x924e:
-		model_ = PxMltDeviceModel::ISDB6014_5TS;
-		break;
-
 	default:
 		throw DeviceError("px4::PxMltDevice::PxMltDevice: unsupported device. (unknown product id)");
 	}

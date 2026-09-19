@@ -33,8 +33,7 @@ enum class PxMltDeviceModel {
 	PXMLT5PE,
 	PXMLT8PE3,
 	PXMLT8PE5,
-	ISDB6014_4TS,
-	ISDB6014_5TS
+	ISDB6014_4TS
 };
 
 struct PxMltDeviceConfig final {
