@@ -48,6 +48,7 @@ PxMltDevice::PxMltDevice(const std::wstring &path, const px4::DeviceDefinition &
 		break;
 
 	case 0x24e:
+	case 0x924e:
 		model_ = PxMltDeviceModel::PXMLT5PE;
 		break;
 
