@@ -1,164 +1,103 @@
-# XIT-SQR100 サポート実装サマリー (2026-09-26)
+# XIT-SQR100 対応の実装状況 (2026-09-27 時点)
 
-## 実装完了したもの
+この文書は、GitHub Copilot との相談後に作成された実装サマリーを、現在のリポジトリと照合した記録です。XIT-SQR100 対応は実験的な段階にあり、ソースへ実装された部分と、機器固有の根拠または試験が不足している部分を分けて記載します。
 
-### 1. デバイス定義 (`driver/px4_usb.h`)
-- USB VID: `0x06b8` (XIT)
-- USB PID: `0x106b` (XIT-SQR100)
-- デバイス型列挙: `XITSQR100_USB_DEVICE` を追加
-- MAX_USB_DEVICE_TYPE 前に配置完了
+## リポジトリで確認できる変更
 
-### 2. CXD6866AER tuner ドライバ (`driver/cxd6866.{h,c}`)
-- **状態**: スケルトン実装（コンパイル可能だが機能未実装）
-- ヘッダー API: CXD2858ER と同じシグネチャで統一
-  - `cxd6866_init(tuner)` → `-EOPNOTSUPP` を返す（未実装警告）
-  - `cxd6866_set_params_t(tuner, system, freq, bandwidth)` → `-EOPNOTSUPP`
-  - `cxd6866_set_params_s(tuner, system, freq, symbol_rate)` → `-EOPNOTSUPP`
-  - `cxd6866_stop(tuner)` → `0` (stub)
-  - `cxd6866_term(tuner)` → NOP
-- I2C ヘルパー関数を提供（`__maybe_unused` マーク）
-- 登録マップ、tuning シーケンス: **未実装（TODO コメント付き）**
+以下のファイルに XIT-SQR100 用の変更が含まれています。
 
-### 3. XIT-SQR100 デバイスドライバ (`driver/xit_sqr100_device.{h,c}`)
-- **構造**: s1ur_device.c（単一 tuner）+ pxmlt_device.c（CXD2856ER + tuner pairing）をハイブリッド
-- **TS 同期**: 平文 `0x47` sync byte（`px4_ts_has_plain_sync` 使用、PXMLT の受信機番号付き sync ではない）
-- **主要機能**:
-  - `xit_sqr100_backend_set_power`: GPIO 3/2 power sequence (s1ur_device.c パターン)
-  - `xit_sqr100_chrdev_open`: CXD2856ER + CXD6866 の init + CXD2856ER 初期化レジスタ sequence
-  - `xit_sqr100_chrdev_tune`: ISDB-T/S 対応、tuner_lock での排他制御
-  - `xit_sqr100_chrdev_check_lock`: CXD2856ER TS lock 判定（unlocked で ECANCELED）
-  - `xit_sqr100_chrdev_set_stream_id`: ISDB-S stream ID/slot 管理
-  - `xit_sqr100_chrdev_set_lnb_voltage`: GPIO 11 LNB 電源管理（pxmlt パターン）
-  - `xit_sqr100_chrdev_start/stop_capture`: TS ストリーミング + PSB purge
-  - `xit_sqr100_chrdev_read_cnr_raw`: ISDB-T/S CNR 参照テーブル（pxmlt から複製）
-- **状態**: オブジェクト寿命、排他制御、TS 処理の骨組みは完成
-- **未検証**: hardware-specific レジスタ値、GPIO pin 割り当て、I2C address 設定
+- `driver/px4_usb.h`、`driver/px4_usb.c`: USB VID/PID とデバイス種別、probe/disconnect、chrdev 登録
+- `driver/xit_sqr100_device.h`、`driver/xit_sqr100_device.c`: Linux デバイス処理、TS 同期・受信、ISDB-T/S の制御経路
+- `driver/cxd6866.h`、`driver/cxd6866.c`: CXD6866AER 用の tuner API と未実装スタブ
+- `driver/Kbuild`: 新しいオブジェクトとデバイス数設定
+- `etc/99-px4video.rules`: udev ルール
+- `README.md`: 実験的対応機種としての掲載
 
-### 4. USB レイヤー統合 (`driver/px4_usb.c`)
-- 新 VID `0x06b8` の probe case を追加
-- XITSQR100 デバイス型のコンテキスト union entry を追加
-- `px4_usb_disconnect` に XITSQR100_USB_DEVICE case を追加
-- USB device ID テーブルに `{ USB_DEVICE(0x06b8, USB_PID_XIT_SQR100) }` を追加
-- `px4_usb_register` で chrdev context 作成（isdbt2071 直後、xitsqr100video デバイス）
-- `px4_usb_unregister` で逆順 destroy を追加
+## 実装済みの範囲
 
-### 5. ビルドシステム (`driver/Kbuild`)
-- `XITSQR100_USB_MAX_DEVICE := 0` 定義を追加
-- ccflags `-DXITSQR100_USB_MAX_DEVICE` の conditional block を追加
-- オブジェクト: `cxd6866.o xit_sqr100_device.o` を px4_drv-y に追加
+### USB デバイス登録
 
-### 6. udev ルール (`etc/99-px4video.rules`)
-- `KERNEL=="xitsqr100video*", GROUP="video", MODE="0664"` を追加
-- USB power control: `SUBSYSTEM=="usb", ATTRS{idVendor}=="06b8", ACTION=="add", TEST=="power/control", ATTR{power/control}="on"` を追加
+VID `0x06b8`、PID `0x106b` を XIT-SQR100 として扱う経路が `px4_usb.c` にあります。デバイス種別、切断処理、chrdev コンテキストの登録と解除も追加されています。
 
-### 7. ドキュメント (`README.md`)
-- 対応デバイス表に XIT-SQR100 (実験的) を追加
-- NOTE セクションに新規サポート一覧へ「XIT XIT-SQR100 (実験的、Linux 版のみ)」を追加
+### デバイス処理の骨組み
 
-## 未検証・未実装の項目（ハードウェア/データシート確認が必須）
+`xit_sqr100_device.c` には電源制御、open/close、tune、lock 判定、ISDB-S stream ID と LNB 電圧、TS capture、CNR 取得の経路があります。TS 同期には通常の `0x47` を前提とする `px4_ts_has_plain_sync()` を使用しています。
 
-### CXD6866AER tuner driver
-| 項目 | 状態 | 理由 |
-|------|------|------|
-| I2C address | プレースホルダー: `0x60` | pxmlt の CXD2858ER パターンをコピー。XIT-SQR100 スキーマティック未確認 |
-| Crystal frequency (xtal) | プレースホルダー: `16000` kHz | pxmlt 値をコピー。実機 or datasheet 確認が必須 |
-| LNA 設定 (ter/sat) | `true` | pxmlt 値をコピー。実機動作確認が必須 |
-| Register map (tuning sequence) | **未実装** | CXD6866AER datasheet が利用不可。init/set_params_t/set_params_s は `-EOPNOTSUPP` を返す |
+ただし、これらの処理に設定されている機器固有の値が実機と一致することや、チューナーが実際に選局できることは確認されていません。コードが存在することを、機能検証済みとは扱いません。
 
-### IT9303FN GPIO & I2C 配置
-| 項目 | 現在の値 | 根拠 | 未検証 |
-|------|---------|------|--------|
-| Power GPIO (on) | GPIO 3 → LOW, 100ms, GPIO 2 → HIGH | s1ur_device.c (ISDBT2071_MODEL) パターン | ✗ |
-| Power GPIO (off) | GPIO 2 → LOW, GPIO 3 → HIGH | s1ur_device.c パターン | ✗ |
-| LNB voltage GPIO | GPIO 11 | pxmlt_device.c パターン | ✗ |
-| Input port_number | `4` | pxmlt ISDBT2071_MODEL パターン | ✗ |
-| I2C bus | `3` | pxmlt ISDBT2071_MODEL パターン | ✗ |
-| CXD2856ER I2C address (SLVT) | `0x18` | pxmlt ISDBT2071_MODEL パターン | ✗ |
-| CXD2856ER I2C address (SLVX) | `0x1A` (0x18 + 2) | pxmlt 規則に従う | ✗ |
+### CXD6866AER tuner API
 
-### TS 同期
-- **仮定**: XIT-SQR100 は平文 `0x47` sync byte を出力（PXS1UR / ISDBT2071 同様）
-- **根拠**: ISDB-T/S の標準 TS format であり、pxmlt_device.c の受信機番号付き sync ではない
-- **未検証**: 実機受信での sync byte 確認
+`cxd6866.c` は I²C ヘルパーと API の形を持ちますが、初期化と ISDB-T/S 選局シーケンスは未実装です。`cxd6866_init()`、`cxd6866_set_params_t()`、`cxd6866_set_params_s()` は `-EOPNOTSUPP` を返し、tuner は利用できません。したがって XIT-SQR100 の実受信対応は完成していません。
 
-### その他
-| 項目 | 状態 |
-|------|------|
-| ドライバコンパイル | **未確認**（Windows ビルド環境なし。Linux WSL/VM で実行が必要） |
-| 実機受信テスト | **未実施**（物理デバイス及び実機環境がない） |
-| 長時間連続受信テスト | **未実施** |
-| チャンネル切り替え時の同期エラー | **未確認** |
-| LNB voltage 制御 | **未検証** |
-| B-CAS card reader 統合 | **未実装**（Linux 版では予定なし） |
+## FREIA 参照実装との照合
 
-## 次ステップ（実装者向け）
+`sony_cxd_family/family_source/tuner/terr_cable_sat_freia/` に CXD6866AER (FREIA) を含む Sony の tuner 実装がありました。`refcode/sony_freia.c` はレジスタ I/O と選局手順、`sony_tuner_freia.c` は Sony 共通 tuner API からの呼び出しと待機を実装しています。このソースは CXD6866AER の動作手順を調べる一次資料として利用できます。ただし、同じチップを使うことだけでは XIT-SQR100 の接続や基板設定まで一致するとは限りません。
 
-### 優先度 1: Linux 環境でのコンパイル確認
-```bash
-cd driver/
-make
-```
-- `cxd6866.c` の `__maybe_unused` マークが `-Werror` をクリアするか確認
-- include path, symbol export が正しいか確認
+ソースから確認できる事項は次のとおりです。
 
-### 優先度 2: CXD6866AER tuning 実装
-1. XIT-SQR100 technical manual / CXD6866AER datasheet を入手
-2. tuning register sequence を `cxd6866_set_params_t/s` へ実装
-3. I2C address, xtal frequency, LNA config を確認・修正
-4. `cxd6866_init()` の power-on sequence を実装
-5. `-EOPNOTSUPP` 返却を削除
+- 初期化時に I²C レジスタ `0x7F` を読み、`data & 0xFC == 0xF8` を CXD6866AER として識別します。`sony_freia.h` は I²C アドレスを8-bit形式と定義し、既定値を `0xC0` としています。Linux の7-bit表記へ換算すると `0x60` です。
+- 地上波選局は規格・帯域に応じた FREIA 設定で `TER_tune` を実行し、50 ms 待ってから `TER_tune_end` を呼びます。ISDB-T 6 MHz の表には既定 IF 3.55 MHz が記載されています。
+- ISDB-S のシンボルレートは `28860 ksps` に固定されます。衛星選局は `SAT_tune` の後に10 ms待って `SAT_tune_end` を行い、上位 wrapper はさらに50 ms待ちます。
+- 内部水晶を使う参照設定では `xosc_sel=0x04`、`xosc_cap_set=0x1E` を設定し、コメントは6 pF水晶向けと説明します。これは XIT-SQR100 の水晶周波数や実装部品を示す情報ではありません。
 
-### 優先度 3: GPIO & I2C 配置確認
-1. XIT-SQR100 PCB schematic を入手
-2. IT9303FN GPIO pin → 回路機能のマッピング
-3. I2C デバイス: CXD2856ER i2c_addr, CXD6866 i2c_addr の確認
-4. `xit_sqr100_device_load_config()` の port_number / i2c_bus / i2c_addr を修正
+この照合により、`driver/xit_sqr100_device.c` の tuner I²C 7-bit address `0x60` は参照実装の既定アドレスと整合します。ただし、XIT-SQR100 で実際に応答すること、衛星モードで同じアドレスを使うこと、参照実装の水晶・電源・LNA 設定を採用できることは未確認です。Windows ドライバーの Ghidra 解析で確認した GPIO 初期化ログや CXD2856 経由の tuner I²C 操作も、この基板の具体的な GPIO 極性・選局レジスタ列を確定する証拠にはなりません。
 
-### 優先度 4: 実機テスト
-1. XIT-SQR100 を Linux PC に接続
-2. `insmod px4_drv.ko` 実行、`/dev/xitsqr100video0` が出現することを確認
-3. 地上波 ISDB-T チャンネルで受信テスト（記録時間 1–2 時間）
-   - D, E, S の確認
-   - transport error flag (TEI) カウント
-   - continuity counter エラー検出
-4. BS/CS ISDB-S で受信テスト（同様に統計情報確認）
-5. チャンネル切り替え時の TS 同期エラー検出
+### Windows ドライバーの tuner 関数
 
-### 優先度 5: WinUSB 版（オプション）
-- Windows 版 DriverHost_PX4 対応は **本実装では未開始**
-- 詳細は AGENTS.md の「WinUSB 版」セクション参照
+Ghidra でログ文字列の参照先を確認し、次の関数を特定しました。
 
-## コンパイラ警告の抑止理由
+| 関数 | 確認できた処理 |
+|---|---|
+| `FUN_140006c44` (`DRV_InitTuner`) | chip type `0x21` の場合に FREIA tuner と CXD2856 demod を作成・初期化し、TS 出力設定を適用 |
+| `FUN_140019f08` (`DRV_WriteTunerReg`) | repeater を有効化して tuner register を書き、repeater を閉じた後、再度開いて register `0x80` に `1` を書く経路を実行 |
+| `FUN_14000e224` (`DRV_ReadTunerReg`) | repeater を有効化して tuner register を読み、処理後に repeater を閉じる |
 
-### `cxd6866.c` の `__maybe_unused` 属性
-`cxd6866_read_regs`, `cxd6866_read_reg`, `cxd6866_write_regs`, `cxd6866_write_reg`, `cxd6866_write_reg_mask` は、
-当前は `cxd6866_set_params_t/s` で使用されていない placeholder helper です。
-登録マップが判明する際に実装されます。`-Werror` ビルドでの unused function warning を回避するため、
-`__maybe_unused` を付与しています。
+`DRV_InitTuner` は NLC index 0 で tuner address `0xC0`、index 1 で `0xC2` を FREIA 作成関数へ渡しています。各 index で demod 作成へ渡す値もそれぞれ `0xC8` と `0xCA` です。FREIA ソースのアドレス形式定義に照らすと tuner address は7-bit `0x60` / `0x61` に対応します。これは Windows ドライバーが複数 index 用に持つ設定で、XIT-SQR100 の単一 tuner にどちらが割り当たるかまでは特定できません。
 
-## 参照・設計根拠
+I²C repeater の有効化・無効化は CXD2856 の API を介し、実際の tuner read/write は FREIA の callback へ委譲されています。書き込み後の register `0x80` への追加書き込みの目的は、逆コンパイル結果だけからは断定できません。これらの経路は通信構造の確認に使えますが、ログや関数名だけから GPIO の基板配線や特定チャンネルの選局シーケンスを復元したものではありません。
 
-| 項目 | 参照先 | 選定理由 |
-|------|--------|---------|
-| デバイス構造 (chrdev, device, open/close/tune) | s1ur_device.c | 単一 tuner, plain 0x47 TS, ISDB-T/S 両対応 |
-| CXD2856ER + tuner pairing | pxmlt_device.c | CXD2856ER demod + Sony tuner wiring, LNB voltage |
-| TS 同期処理 | s1ur_device.c (px4_ts_has_plain_sync) | plain 0x47 format |
-| GPIO power | s1ur_device.c (GPIO 3/2) → ISDBT2071_MODEL | 単一 tuner 電源パターン |
-| LNB voltage GPIO | pxmlt_device.c (GPIO 11) | 衛星電源一元管理 |
-| CNR lookup table | pxmlt_device.c (isdbt_cn_raw_table / isdbs_cn_raw_table) | ISDB-T/S 両対応 |
-| USB layer | px4_usb.c probe/disconnect/register pattern | 既存デバイス型との統一 |
+## 未確認の機器固有値
 
-## AGENTS.md ガイダンスへの準拠
+次の値は既存機種のコードを参考に置かれた候補値であり、XIT-SQR100 の回路図、データシート、または実機で確定していません。
 
-✓ 最小限の差分 (cxd6866/xit_sqr100 新規追加のみ、既存ファイルは機能維持)  
-✓ 実測値のみ使用 (timeout/tuning sequence は placeholder TODO)  
-✓ 状態破棄の完全性 (atomic_xchg available, kfree stream_ctx)  
-✓ エラー境界保持 (CXD6866 未実装は -EOPNOTSUPP で明示)  
-✓ 確認範囲の明記 (このドキュメント，各 TODO コメント)  
-✓ 実機試験の確認必須事項記載 (D/E/S, TEI, continuity error など)  
+| 項目 | 現在の候補 | 確認状況 |
+|---|---:|---|
+| CXD6866AER I²C 7-bit address | `0x60` | FREIA 参照実装の既定値と一致。XIT-SQR100 上の応答は未確認 |
+| CXD6866AER crystal | 16 MHz | 未確認 |
+| CXD6866AER LNA 設定 | 地上波・衛星とも有効 | 未確認 |
+| IT9303 GPIO 電源シーケンス | GPIO 3/2 | 未確認 |
+| LNB 電圧制御 GPIO | GPIO 11 | 未確認 |
+| IT9303 I²C bus / input port | bus 3 / port 4 | 未確認 |
+| CXD2856ER SLVT/SLVX address | `0x18` / `0x1a` | 未確認 |
+| TS 同期形式 | 通常の `0x47` | 実機 TS 未確認 |
 
----
+前回の `IT9300BDA.sys` 解析で見つかった `0xC0` / `0xC2` は、CXD2856 の tuner 経由 API に渡される8-bit形式のアドレス候補です。7-bit表記では `0x60` / `0x61` に相当します。ただし、Windows ドライバ内の複数デバイス用コードに現れた値であり、XIT-SQR100 の実装値だとは確認できていません。
 
-**実装者**: GitHub Copilot  
-**実装日**: 2025-01-22  
-**最後に**: 本実装は Linux 版のみです。Windows WinUSB 版の対応は別途検討が必要です。
+同ドライバには `DRV_InitCXD2856GPIO` および `Set CXD2856+CXD6866 GPIO` の文字列もあります。文字列だけでは GPIO 番号、極性、初期化順序、XIT-SQR100 基板との対応は分かりません。既存の Linux コードへそのまま移す根拠にはなりません。
+
+## 検証状況
+
+この記録の作成時点で確認できているのはソース上の実装範囲と、Ghidra 上での Windows ドライバの文字列・シンボル情報です。以下は未確認です。
+
+- Linux カーネルモジュールのビルド
+- 実機での USB 認識、デバイス初期化、I²C 応答
+- ISDB-T / ISDB-S の選局と TS 同期
+- D/E/S、TEI、continuity counter、空受信の計数
+- チャンネル切り替え時の同期回復
+- LNB 電圧制御
+- 長時間連続受信
+- Windows WinUSB 版
+
+実機試験を行う場合は、対象機種・アンテナ・カード配置・試験時間と、D/E/S、同期エラー、TEI、continuity counter、空受信時間を記録してください。実機を使えない条件では、未確認のまま残します。
+
+## 次に必要な資料と作業
+
+1. XIT-SQR100 の回路図または技術資料を入手し、IT9303 GPIO、I²C bus、CXD2856ER と CXD6866AER の接続を確認する。
+2. FREIA 参照実装と Windows ドライバー解析を対応づけ、XIT-SQR100 の接続条件を確認してから初期化・選局・停止シーケンスを実装する。
+3. CXD2856ER と tuner の I²C リピータ経路、アドレス形式、電源投入順を確認する。
+4. Linux ビルドを行い、利用可能な自動試験を実行する。
+5. 実機で ISDB-T/S の受信、チャンネル切り替え、LNB 制御、継続受信を検証する。
+
+## 現在の位置づけ
+
+XIT-SQR100 の Linux 用デバイス登録と処理の骨組みはリポジトリにあります。CXD6866AER の選局処理は未実装で、GPIO・I²C・TS 形式も未確認です。README にある「実験的」対応の範囲を超えて、実受信対応済みとは判断できません。
