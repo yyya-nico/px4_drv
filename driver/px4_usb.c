@@ -506,7 +506,7 @@ static struct usb_driver px4_usb_driver = {
 		goto fail_isdbt2071;
 	}
 
-	ret = ptx_chrdev_context_create("xitsqr100", "xitsqr100video",
+	ret = ptx_chrdev_context_create("xitsqr100", "sqr100video",
 					XITSQR100_USB_MAX_CHRDEV,
 					&px4_usb_chrdev_ctx[XITSQR100_USB_DEVICE]);
 	if (ret) {
