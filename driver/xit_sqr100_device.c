@@ -48,13 +48,7 @@ static int xit_sqr100_backend_set_power(struct xit_sqr100_device *xit,
 		return 0;
 
 	if (state) {
-		/*
-		 * TODO: Verify IT9303FN GPIO power sequence for the XIT-SQR100.
-		 * This is a placeholder based on s1ur_device.c (GPIO3→low,
-		 * 100ms, GPIO2→high, 20ms).  Real hardware may require different
-		 * GPIO pins and timing.
-		 */
-		ret = it930x_write_gpio(it930x, 3, false);
+		ret = it930x_write_gpio(it930x, 2, false);
 		if (ret)
 			return ret;
 
@@ -67,7 +61,6 @@ static int xit_sqr100_backend_set_power(struct xit_sqr100_device *xit,
 		msleep(20);
 	} else {
 		it930x_write_gpio(it930x, 2, false);
-		it930x_write_gpio(it930x, 3, true);
 	}
 
 	return 0;
@@ -874,18 +867,6 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 		goto fail_device;
 
 	/* GPIO */
-	/*
-	 * TODO: Verify IT9303FN GPIO power pin assignments for the XIT-SQR100.
-	 * GPIO 3/2 are provisional assignments based on s1ur_device.c.
-	 */
-	ret = it930x_set_gpio_mode(it930x, 3, IT930X_GPIO_OUT, true);
-	if (ret)
-		goto fail_device;
-
-	ret = it930x_write_gpio(it930x, 3, true);
-	if (ret)
-		goto fail_device;
-
 	ret = it930x_set_gpio_mode(it930x, 2, IT930X_GPIO_OUT, true);
 	if (ret)
 		goto fail_device;
