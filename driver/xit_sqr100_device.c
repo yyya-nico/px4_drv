@@ -2,12 +2,12 @@
 /*
  * PTX driver for XIT XIT-SQR100 device (xit_sqr100_device.c)
  *
- * NOTE: The CXD6866AER register map, the IT9303FN GPIO power/LNB pin
- * assignments, and the input port / I2C bus / I2C address for this board
- * have NOT been verified against a datasheet or real hardware.
+ * NOTE: The IT9303FN board power GPIO assignments and the input port / I2C
+ * bus / I2C address for this board have NOT been verified against a datasheet
+ * or real hardware.
  *
  * The implementation below follows the structure of pxmlt_device.c
- * (CXD2856ER demod + tuner pairing + LNB voltage management) and
+ * (CXD2856ER demod + tuner pairing) and
  * s1ur_device.c (single-tuner ISDB-T/S structure, plain 0x47 TS sync).
  * All hardware-specific TODO markers flag values that must be confirmed
  * on the target board before the driver is considered functional.
@@ -303,15 +303,6 @@ static int xit_sqr100_chrdev_release(struct ptx_chrdev *chrdev)
 	dev_dbg(xit->dev,
 		"xit_sqr100_chrdev_release %u\n", chrdev_group->id);
 
-	/* Ensure LNB is powered off */
-	if (chrdevs->lnb_power) {
-		struct ptx_tune_params dummy = {};
-		int dummy_ret __maybe_unused;
-
-		/* Reuse the lnb voltage setter pattern */
-		dummy_ret = xit_sqr100_chrdev_set_lnb_voltage(chrdev, 0);
-	}
-
 	mutex_lock(&xit->lock);
 
 	if (!xit->open_count) {
@@ -477,51 +468,6 @@ static int xit_sqr100_chrdev_set_stream_id(struct ptx_chrdev *chrdev, u16 stream
 				chrdev_group->id, stream_id, ret);
 	}
 
-	return ret;
-}
-
-static int xit_sqr100_chrdev_set_lnb_voltage(struct ptx_chrdev *chrdev, int voltage)
-{
-	int ret = 0;
-	struct xit_sqr100_chrdev *chrdevs = chrdev->priv;
-	struct xit_sqr100_device *xit = chrdevs->parent;
-
-	dev_dbg(xit->dev,
-		"xit_sqr100_chrdev_set_lnb_voltage %u voltage: %d\n",
-		chrdev->parent->id, voltage);
-
-	if (voltage != 0 && voltage != 15)
-		return -EINVAL;
-
-	if (chrdevs->lnb_power == !!voltage)
-		return 0;
-
-	if (!voltage && !atomic_read(&xit->available))
-		return 0;
-
-	mutex_lock(&xit->lock);
-
-	if (!voltage)
-		xit->lnb_power_count--;
-
-	if (!xit->lnb_power_count) {
-		/*
-		 * TODO: Verify IT9303FN LNB voltage GPIO pin for the
-		 * XIT-SQR100. This uses GPIO11 (matching pxmlt_device.c)
-		 * but must be confirmed on real hardware.
-		 */
-		ret = it930x_write_gpio(&xit->it930x, 11, !!voltage);
-		if (ret && voltage)
-			goto exit;
-	}
-
-	if (voltage)
-		xit->lnb_power_count++;
-
-	chrdevs->lnb_power = !!voltage;
-
-exit:
-	mutex_unlock(&xit->lock);
 	return ret;
 }
 
@@ -780,7 +726,7 @@ static struct ptx_chrdev_operations xit_sqr100_chrdev_ops = {
 	.tune = xit_sqr100_chrdev_tune,
 	.check_lock = xit_sqr100_chrdev_check_lock,
 	.set_stream_id = xit_sqr100_chrdev_set_stream_id,
-	.set_lnb_voltage = xit_sqr100_chrdev_set_lnb_voltage,
+	.set_lnb_voltage = NULL,
 	.set_capture = xit_sqr100_chrdev_set_capture,
 	.read_signal_strength = NULL,
 	.read_cnr = NULL,
@@ -835,21 +781,20 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	chrdevs->cxd2856er.config.tuner_i2c = true;
 
 	/*
-	 * TODO: Verify CXD6866AER I2C address and crystal frequency for the
-	 * XIT-SQR100. The values below are placeholders based on the sibling
-	 * CXD2858ER in pxmlt_device.c:
-	 *   i2c_addr = 0x60 (connected to CXD2856ER's I2C master)
-	 *   xtal = 16000 kHz (16 MHz)
-	 *   LNA: true for both terrestrial and satellite
-	 * These must be confirmed against the XIT-SQR100 schematic and/or
-	 * real hardware before the tuner driver can be made functional.
+	 * CXD6866AER (FREIA) board settings, taken from the XIT-SQR100
+	 * Windows driver (IT9300BDA.sys):
+	 *   i2c_addr = 0x60 (7-bit; the driver passes the 8-bit form 0xC0,
+	 *               connected to the CXD2856ER's I2C master)
+	 *   xtal = 24000 kHz (24 MHz crystal; register 0x81 = 0x18 in the
+	 *          binary's X_pon)
+	 *   loop_filter_internal + outlmt_dtv_1_2vpp (config flags 0x10004000)
 	 */
 	chrdevs->cxd6866.dev = dev;
 	chrdevs->cxd6866.i2c = &chrdevs->cxd2856er.i2c_master;
 	chrdevs->cxd6866.i2c_addr = 0x60;
-	chrdevs->cxd6866.config.xtal = 16000;
-	chrdevs->cxd6866.config.ter.lna = true;
-	chrdevs->cxd6866.config.sat.lna = true;
+	chrdevs->cxd6866.config.xtal = 24000;
+	chrdevs->cxd6866.config.loop_filter_internal = true;
+	chrdevs->cxd6866.config.outlmt_dtv_1_2vpp = true;
 
 	return 0;
 }
@@ -878,13 +823,11 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 	xit->dev = dev;
 	xit->quit_completion = quit_completion;
 	xit->open_count = 0;
-	xit->lnb_power_count = 0;
 	xit->streaming_count = 0;
 	mutex_init(&xit->tuner_lock);
 
 	xit->chrdevs.chrdev = NULL;
 	xit->chrdevs.parent = xit;
-	xit->chrdevs.lnb_power = false;
 	xit->chrdevs.tuner_lock = &xit->tuner_lock;
 
 	stream_ctx = kzalloc(sizeof(*stream_ctx), GFP_KERNEL);
@@ -932,13 +875,8 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 
 	/* GPIO */
 	/*
-	 * TODO: Verify IT9303FN GPIO pin assignments for power, LNB voltage,
-	 * and any other control signals on the XIT-SQR100 board.
-	 * The assignments below are placeholders based on pxmlt_device.c:
-	 *   GPIO7:  Power control (on-device power supply)
-	 *   GPIO2:  Power control (external power / regulator enable)
-	 *   GPIO11: LNB voltage control (satellite LNB power supply)
-	 * These must be confirmed against the XIT-SQR100 schematic.
+	 * TODO: Verify IT9303FN GPIO power pin assignments for the XIT-SQR100.
+	 * GPIO 3/2 are provisional assignments based on s1ur_device.c.
 	 */
 	ret = it930x_set_gpio_mode(it930x, 3, IT930X_GPIO_OUT, true);
 	if (ret)
@@ -953,15 +891,6 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 		goto fail_device;
 
 	ret = it930x_write_gpio(it930x, 2, false);
-	if (ret)
-		goto fail_device;
-
-	ret = it930x_set_gpio_mode(it930x, 11, IT930X_GPIO_OUT, true);
-	if (ret)
-		goto fail_device;
-
-	/* LNB power supply: off */
-	ret = it930x_write_gpio(it930x, 11, false);
 	if (ret)
 		goto fail_device;
 

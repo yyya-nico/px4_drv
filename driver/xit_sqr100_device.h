@@ -6,14 +6,10 @@
  * built on the ITE IT9303FN USB bridge, the Sony CXD2856ER demodulator
  * and the Sony CXD6866AER tuner.
  *
- * NOTE: The CXD6866AER register map, the IT9303FN GPIO power/LNB pin
- * assignments, and the input port / I2C bus / I2C address for this board
- * have NOT been verified against a datasheet or real hardware.  The values
- * used in xit_sqr100_device.c are placeholders derived from the closest
- * analog in this repository (pxmlt_device.c for the demod pairing and
- * LNB/streaming management, s1ur_device.c for the single-tuner structure)
- * and MUST be verified on the target board before this driver is
- * considered functional.  See the TODO markers in xit_sqr100_device.c.
+ * The manufacturer specifies that the XIT-SQR100 does not supply power to
+ * BS/CS antennas, so this device does not expose LNB voltage control.  The
+ * IT9303FN board power GPIOs and input port / I2C bus / address are still
+ * provisional values derived from related devices and need confirmation.
  */
 
 #ifndef __XITSQR100_DEVICE_H__
@@ -38,7 +34,6 @@ struct xit_sqr100_device;
 struct xit_sqr100_chrdev {
 	struct ptx_chrdev *chrdev;
 	struct xit_sqr100_device *parent;
-	bool lnb_power;
 	struct mutex *tuner_lock;
 	struct cxd2856er_demod cxd2856er;
 	struct cxd6866_tuner cxd6866;
@@ -51,7 +46,6 @@ struct xit_sqr100_device {
 	struct device *dev;
 	struct completion *quit_completion;
 	unsigned int open_count;
-	unsigned int lnb_power_count;
 	unsigned int streaming_count;
 	struct mutex tuner_lock;
 	struct ptx_chrdev_group *chrdev_group;
