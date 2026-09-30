@@ -131,3 +131,17 @@ XIT-SQR100 の Linux 用デバイス登録と処理の骨組みはリポジト�
 `FUN_140020440` は mutex `param_1 + 0x2eeef8` を取得して `FUN_14000d684` を呼び出す薄い排他ラッパーです。`FUN_14000d684` はデバイスの chip type による周波数設定関数の dispatch で、type `0x21` は `FUN_140013810` (`DRV_SetFreqBwSonyCXD2856ISDBT`) へ進みます。この関数は保存済みまたは新規の周波数・帯域幅を選び、周波数が 900 MHz 未満なら CXD2856 の ISDB-T Tune、900 MHz 以上なら ISDB-S Tune を呼び、TS lock を読みます。lock 成功後には100 ms待つ経路もあります。
 
 この経路は `0x21` が CXD2856/CXD6866 構成の tuner 設定処理へ接続されることと、周波数設定・ロック確認の流れを示します。一方、これだけでは USB PID から `0x21` が選ばれる条件、前回の GPIO 初期化関数との接続、XIT-SQR100 基板上の GPIO 配線は確定しません。
+
+`FUN_1400eb090` はログ上 `DeviceStart` として、登録済みの chip/filter 構成に応じた BDA filter factory を作ります。device の chip type が `!` (`0x21`) の場合、filter factory 登録前に `FUN_140020224` を呼びます。同関数は mutex 下で `FUN_140006684` を実行するため、前述の GPIO レジスタ列がこの CXD2856+CXD6866 構成の DeviceStart 経路で使われることを確認できました。
+
+`FUN_1400f1fa0` は Windows の電源状態遷移を扱い、D0 への復帰ではデバイスを再初期化し、低電力側では各 filter の稼働状態を反映して selective suspend 等へ進みます。chip type `!` の場合、低電力側でも `FUN_140020224` 経由で `FUN_140006684` を呼ぶ経路があります。したがって GPIO 列は単発のチューナー設定だけでなく、DeviceStart と電源状態遷移の両方に結び付いています。どの USB PID がこの chip type を構成するか、および基板信号名と極性は別途確認が必要です。
+
+### 2026-10-01 Ghidra B-CAS 経路と px4_drv の照合
+
+列挙された `FUN_14000195c` / `FUN_140001aa8` / `FUN_140001a00` / `FUN_140001b84` / `FUN_140001d84` / `FUN_140001e60` / `FUN_140001c74` は、Windows ドライバーの B-CAS UART API ラッパーです。通常経路は IT930x の UART command と状態レジスタを使い、Linux の [`driver/it930x.c`](../driver/it930x.c) と下位通信はよく一致します。具体的には UART command `0x33` (read)、`0x34` (write)、`0x35` (baud rate)、`0x37` (mode)、ready register `0x496a`、受信長 `0x496b`、送信確定 register `0x4965` が一致します。関数名だけでなく本文を確認すると、`FUN_14000195c` はログに ResetUartCard と出しますが、実際には GPIO H6 を入力にしてカード検出を行います。また `FUN_140001a00` はログに SentUARTData と出す一方、実体は command `0x33` による受信データ読み出しで、送信は `FUN_140001b84` の command `0x34` です。通常カード検出は GPIO H6 を入力として読み Low Active とし、reset は GPIO H14 を Low にして UART reset register `0x7904` に `2` を書き、5 ms 後に High に戻します。Linux 側も同じ H6 / H14、register と pulse 時間を使います。Windows の検出ラッパーは H6 を都度入力設定しますが、Linux は初期化時に入力設定を済ませる違いがあります。
+
+ATR と通信状態管理には違いがあります。Windows の `FUN_140001d84` は受信長が13 byte のときに ATR を読み出す経路で、reset 後の `FUN_140001aa8` は ready register を10 ms間隔でポーリングします。列挙された関数内では有限回数の上限が見当たりません。一方、WinUSB 版 [`smart_card.cpp`](../winusb/src/DriverHost_PX4/smart_card.cpp) は ATR を解析して期待長を決め、絶対期限で受信完了を待ち、挿抜や失敗時にセッションを破棄します。T=1 の block handling も WinUSB 版の上位層が持ち、列挙された Windows ドライバー関数は主に UART byte transport を公開しています。
+
+baud rate API にも差があります。Windows の `FUN_140001c74` は 9600 / 19200 / 38400 をそれぞれ `0` / `1` / `2` へ変換しますが、その呼び出し先 `FUN_140052384` が受理するのは `0` / `1` のみです。reset 用の別 helper `FUN_14005481c` は `2` も受理します。Linux 側は 38400 に `0xef` を指定する特別扱いを実装しています。この差は 38400 baud の対応経路とカード種別条件を追加で調べる必要があります。
+
+`FUN_140002794` / `FUN_140002838` はログ上 Extended B-CAS API で、通常経路とは異なる GPIO H15 (card detect) と H1 (reset) を使います。これは Linux の標準 H6 / H14 配線とは一致しない別 board variant と考えられますが、どの製品がこの経路を選ぶかは未特定です。`FUN_14000c65c` は設定 byte `param_1 + 0x311e11` が `2` の場合に B-CAS UART mode (`command 0x37`, value `1`) を初期化します。列挙中の `FUN_14000c65c` 重複は同一関数です。
