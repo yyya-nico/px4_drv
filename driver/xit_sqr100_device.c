@@ -751,25 +751,23 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	input->enable = true;
 	input->is_parallel = false;
 	/*
-	 * TODO: Verify IT9303FN input port/I2C bus/I2C address for the
-	 * XIT-SQR100. The values below are placeholders based on the
-	 * ISDBT2071_MODEL path in pxmlt_device.c:
-	 *   port_number = 4
-	 *   i2c_bus = 3
-	 *   i2c_addr = 0x18 (demod SLVT address, SLVX = 0x1A)
-	 * These must be confirmed on real hardware before use.
+	 * IT9300BDA.sys addresses the CXD2856ER with 8-bit chip_type 0xC8;
+	 * the Linux I2C API uses the corresponding 7-bit address 0x64.
+	 * PXMLT devices using the same demodulator also use 0x64/0x65/0x6c,
+	 * with SLVX at SLVT + 2. The Windows binary evidence identifies the
+	 * address, but the SQR100 wiring has not been verified on hardware.
 	 */
 	input->port_number = 4;
 	input->slave_number = 0;
 	input->i2c_bus = 3;
-	input->i2c_addr = 0x18;
+	input->i2c_addr = 0x64;
 	input->packet_len = 188;
 	input->sync_byte = 0x47;	/* Plain ISDB-T/S sync byte */
 
 	chrdevs->cxd2856er.dev = dev;
 	chrdevs->cxd2856er.i2c = &it930x->i2c_master[input->i2c_bus - 1];
-	chrdevs->cxd2856er.i2c_addr.slvx = input->i2c_addr + 2;	/* 0x1A */
-	chrdevs->cxd2856er.i2c_addr.slvt = input->i2c_addr;	/* 0x18 */
+	chrdevs->cxd2856er.i2c_addr.slvx = input->i2c_addr + 2;	/* 0x66 */
+	chrdevs->cxd2856er.i2c_addr.slvt = input->i2c_addr;	/* 0x64 */
 	chrdevs->cxd2856er.config.xtal = 24000;
 	chrdevs->cxd2856er.config.tuner_i2c = true;
 
