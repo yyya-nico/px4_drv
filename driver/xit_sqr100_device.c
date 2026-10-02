@@ -48,6 +48,12 @@ static int xit_sqr100_backend_set_power(struct xit_sqr100_device *xit,
 		return 0;
 
 	if (state) {
+		ret = it930x_write_gpio(it930x, 5, true);
+		if (ret)
+			return ret;
+
+		msleep(50);
+
 		ret = it930x_write_gpio(it930x, 2, false);
 		if (ret)
 			return ret;
@@ -60,6 +66,7 @@ static int xit_sqr100_backend_set_power(struct xit_sqr100_device *xit,
 
 		msleep(20);
 	} else {
+		it930x_write_gpio(it930x, 5, false);
 		it930x_write_gpio(it930x, 2, false);
 	}
 
@@ -865,6 +872,14 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 		goto fail_device;
 
 	/* GPIO */
+	ret = it930x_set_gpio_mode(it930x, 5, IT930X_GPIO_OUT, true);
+	if (ret)
+		goto fail_device;
+
+	ret = it930x_write_gpio(it930x, 5, false);
+	if (ret)
+		goto fail_device;
+
 	ret = it930x_set_gpio_mode(it930x, 2, IT930X_GPIO_OUT, true);
 	if (ret)
 		goto fail_device;
