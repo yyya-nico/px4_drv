@@ -175,6 +175,14 @@ static int xit_sqr100_chrdev_term(struct ptx_chrdev *chrdev)
 	return 0;
 }
 
+static int xit_sqr100_set_demod_init_sleep(struct xit_sqr100_chrdev *chrdevs,
+					   bool sleep)
+{
+	/* Sony の統合初期化では、tuner の power-on 前後に SLVT 0x08 を切り替える。 */
+	return cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x08,
+					(sleep) ? 0x01 : 0x00);
+}
+
 static int xit_sqr100_chrdev_open(struct ptx_chrdev *chrdev)
 {
 	int ret = 0;
@@ -205,6 +213,14 @@ static int xit_sqr100_chrdev_open(struct ptx_chrdev *chrdev)
 		goto fail_demod_init;
 	}
 
+	ret = xit_sqr100_set_demod_init_sleep(chrdevs, true);
+	if (ret) {
+		dev_err(xit->dev,
+			"xit_sqr100_chrdev_open %u: CXD2856ER init sleep failed. (ret: %d)\n",
+			chrdev_group->id, ret);
+		goto fail_demod_init;
+	}
+
 	mutex_lock(chrdevs->tuner_lock);
 	ret = cxd6866_init(&chrdevs->cxd6866);
 	mutex_unlock(chrdevs->tuner_lock);
@@ -212,6 +228,14 @@ static int xit_sqr100_chrdev_open(struct ptx_chrdev *chrdev)
 	if (ret) {
 		dev_err(xit->dev,
 			"xit_sqr100_chrdev_open %u: cxd6866_init() failed. (ret: %d)\n",
+			chrdev_group->id, ret);
+		goto fail_tuner_init;
+	}
+
+	ret = xit_sqr100_set_demod_init_sleep(chrdevs, false);
+	if (ret) {
+		dev_err(xit->dev,
+			"xit_sqr100_chrdev_open %u: CXD2856ER init wakeup failed. (ret: %d)\n",
 			chrdev_group->id, ret);
 		goto fail_tuner_init;
 	}
