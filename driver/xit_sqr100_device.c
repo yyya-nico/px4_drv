@@ -178,8 +178,8 @@ static int xit_sqr100_chrdev_term(struct ptx_chrdev *chrdev)
 static int xit_sqr100_set_demod_init_sleep(struct xit_sqr100_chrdev *chrdevs,
 					   bool sleep)
 {
-	/* Sony の統合初期化では、tuner の power-on 前後に SLVT 0x08 を切り替える。 */
-	return cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x08,
+	/* Sony の初期化コールバックは SLVX の 0x08 へ sleep 状態を直接書き込む。 */
+	return cxd2856er_write_slvx_reg(&chrdevs->cxd2856er, 0x08,
 					(sleep) ? 0x01 : 0x00);
 }
 
@@ -240,7 +240,7 @@ static int xit_sqr100_chrdev_open(struct ptx_chrdev *chrdev)
 		goto fail_tuner_init;
 	}
 
-	/* CXD2856ER initialization sequence (from pxmlt_device.c) */
+	/* CXD2856ER initialization sequence */
 	ret = cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x00, 0x00);
 	if (ret)
 		goto fail_backend;
@@ -250,38 +250,6 @@ static int xit_sqr100_chrdev_open(struct ptx_chrdev *chrdev)
 	if (ret)
 		goto fail_backend;
 
-	ret = cxd2856er_write_slvt_reg_mask(&chrdevs->cxd2856er,
-					    0xc5, 0x01, 0x01);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg_mask(&chrdevs->cxd2856er,
-					    0xc6, 0x03, 0x1f);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x00, 0x60);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg_mask(&chrdevs->cxd2856er,
-					    0x52, 0x03, 0x1f);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x00, 0x00);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg_mask(&chrdevs->cxd2856er,
-					    0xc8, 0x03, 0x1f);
-	if (ret)
-		goto fail_backend;
-
-	ret = cxd2856er_write_slvt_reg_mask(&chrdevs->cxd2856er,
-					    0xc9, 0x03, 0x1f);
-	if (ret)
-		goto fail_backend;
 
 	ret = cxd2856er_write_slvt_reg(&chrdevs->cxd2856er, 0x00, 0xa0);
 	if (ret)
