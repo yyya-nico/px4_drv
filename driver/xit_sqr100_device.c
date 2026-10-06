@@ -2,9 +2,9 @@
 /*
  * PTX driver for XIT XIT-SQR100 device (xit_sqr100_device.c)
  *
- * NOTE: The IT9303FN board power GPIO assignments and the input port / I2C
- * bus / I2C address for this board have NOT been verified against a datasheet
- * or real hardware.
+ * TS input port 0 and I2C bus 3 / addresses have been checked against
+ * a Windows USB capture and Linux reception on XIT-SQR100. The board power
+ * GPIO assignments and signal polarity still require independent validation.
  *
  * The implementation below follows the structure of pxmlt_device.c
  * (CXD2856ER demod + tuner pairing) and
@@ -86,7 +86,7 @@ static void xit_sqr100_device_stream_process(struct ptx_chrdev *chrdev,
 		/*
 		 * Scan for plain 0x47 sync byte (ISDB-T/S standard TS format).
 		 * Unlike pxmlt_device.c which uses receiver-numbered TS,
-		 * XIT-SQR100 is expected to deliver plain 0x47.
+		 * The IT930x input is configured to output plain 0x47.
 		 * See ts_sync.h for px4_ts_has_plain_sync().
 		 */
 		while (true) {
@@ -165,7 +165,8 @@ static int xit_sqr100_chrdev_init(struct ptx_chrdev *chrdev)
 {
 	dev_dbg(chrdev->parent->dev, "xit_sqr100_chrdev_init\n");
 
-	chrdev->params.system = PTX_ISDB_T_SYSTEM;
+	/* 地デジ・衛星の共用入力は周波数番号から方式を判別する。 */
+	chrdev->params.system = PTX_UNSPECIFIED_SYSTEM;
 	return 0;
 }
 
@@ -733,6 +734,7 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	struct it930x_bridge *it930x = &xit->it930x;
 	struct it930x_stream_input *input = &it930x->config.input[0];
 	struct xit_sqr100_chrdev *chrdevs = &xit->chrdevs;
+	int i;
 	u8 tmp;
 
 	ret = it930x_read_reg(it930x, 0x4979, &tmp);
@@ -754,9 +756,17 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	 * the Linux I2C API uses the corresponding 7-bit address 0x64.
 	 * PXMLT devices using the same demodulator also use 0x64/0x65/0x6c,
 	 * with SLVX at SLVT + 2. The Windows binary evidence identifies the
-	 * address, but the SQR100 wiring has not been verified on hardware.
+	 * address; the Windows USB capture and Linux reception also confirm
+	 * bus 3 and these addresses.
 	 */
-	input->port_number = 4;
+	/*
+	 * Windows の実機キャプチャは 0xda58/0xda73/0xda4c を設定し、
+	 * serial TS の port 0 を使用する。無効入力も別の port を指す
+	 * 必要があり、ゼロ初期値のままだと後続の設定で port 0 が無効になる。
+	 */
+	for (i = 0; i < 5; i++)
+		it930x->config.input[i].port_number = i;
+	input->port_number = 0;
 	input->slave_number = 0;
 	input->i2c_bus = 3;
 	input->i2c_addr = 0x64;
@@ -769,6 +779,7 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	chrdevs->cxd2856er.i2c_addr.slvt = input->i2c_addr;	/* 0x64 */
 	chrdevs->cxd2856er.config.xtal = 24000;
 	chrdevs->cxd2856er.config.tuner_i2c = true;
+	chrdevs->cxd2856er.config.serial_ts_clock = true;
 
 	/*
 	 * CXD6866AER (FREIA) board settings, taken from the XIT-SQR100
@@ -777,14 +788,17 @@ static int xit_sqr100_device_load_config(struct xit_sqr100_device *xit,
 	 *               connected to the CXD2856ER's I2C master)
 	 *   xtal = 24000 kHz (24 MHz crystal; register 0x81 = 0x18 in the
 	 *          binary's X_pon)
-	 *   loop_filter_internal + outlmt_dtv_1_2vpp (config flags 0x10004000)
+	 *   loop_filter_internal + REFOUT_800mVpp (config flags 0x10004000)
 	 */
 	chrdevs->cxd6866.dev = dev;
 	chrdevs->cxd6866.i2c = &chrdevs->cxd2856er.i2c_master;
 	chrdevs->cxd6866.i2c_addr = 0x60;
 	chrdevs->cxd6866.config.xtal = 24000;
 	chrdevs->cxd6866.config.loop_filter_internal = true;
-	chrdevs->cxd6866.config.outlmt_dtv_1_2vpp = true;
+	/* 0x4000 は REFOUT。IF 出力制限の 0x40000 は指定されていない。 */
+	chrdevs->cxd6866.config.outlmt_dtv_1_2vpp = false;
+	/* Windows の実機 USB キャプチャで確認した REFOUT 設定。 */
+	chrdevs->cxd6866.config.refout_enable = true;
 
 	return 0;
 }
@@ -860,6 +874,13 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 		goto fail_device;
 
 	ret = it930x_init_warm(it930x);
+	if (ret)
+		goto fail_device;
+
+	ret = it930x_write_reg(it930x, 0xdab0, 1);
+	if (ret)
+		goto fail_device;
+	ret = it930x_write_reg(it930x, 0xdaae, 0);
 	if (ret)
 		goto fail_device;
 

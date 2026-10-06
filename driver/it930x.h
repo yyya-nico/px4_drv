@@ -105,6 +105,7 @@ int it930x_set_pid_filter(struct it930x_bridge *it930x, int input_idx,
 			  struct it930x_pid_filter *filter);
 int it930x_purge_psb(struct it930x_bridge *it930x, int timeout);
 int it930x_bcas_init(struct it930x_bridge *it930x);
+int it930x_bcas_init_extended(struct it930x_bridge *it930x);
 int it930x_bcas_reset_card(struct it930x_bridge *it930x);
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready);
 int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len);

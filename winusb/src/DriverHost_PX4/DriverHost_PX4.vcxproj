@@ -249,6 +249,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\driver\cxd2856er.c" />
+    <ClCompile Include="..\..\..\driver\cxd6866.c" />
     <ClCompile Include="..\..\..\driver\cxd2858er.c" />
     <ClCompile Include="..\..\..\driver\it930x.c" />
     <ClCompile Include="..\..\..\driver\r850.c" />
@@ -268,6 +269,7 @@
     <ClCompile Include="driver_host.cpp" />
     <ClCompile Include="isdb2056_device.cpp" />
     <ClCompile Include="isdbt2071_device.cpp" />
+    <ClCompile Include="xit_sqr100_device.cpp" />
     <ClCompile Include="itedtv_bus_winusb.c" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="misc_win.c" />
@@ -284,6 +286,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\driver\cxd2856er.h" />
+    <ClInclude Include="..\..\..\driver\cxd6866.h" />
     <ClInclude Include="..\..\..\driver\cxd2858er.h" />
     <ClInclude Include="..\..\..\driver\i2c_comm.h" />
     <ClInclude Include="..\..\..\driver\it930x.h" />
@@ -309,6 +312,8 @@
     <ClInclude Include="driver_host.hpp" />
     <ClInclude Include="isdb2056_device.hpp" />
     <ClInclude Include="isdbt2071_device.hpp" />
+    <ClInclude Include="xit_sqr100_device.hpp" />
+    <ClInclude Include="xit_ts_framer.hpp" />
     <ClInclude Include="misc_win.h" />
     <ClInclude Include="notify_icon.hpp" />
     <ClInclude Include="pipe_server.hpp" />

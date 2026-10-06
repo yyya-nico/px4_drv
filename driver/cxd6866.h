@@ -13,13 +13,13 @@
  * docs/20260926_xitsqr100_implementation_summary.md):
  *   - sony_cxd2856_tuner_freia_Create() is called with config flags
  *     0x10004000 = SONY_FREIA_CONFIG_LOOPFILTER_INTERNAL
- *                 | SONY_FREIA_CONFIG_OUTLMT_DTV_1_2Vpp
+ *                 | SONY_FREIA_CONFIG_REFOUT_800mVpp
  *   - tuner I2C 7-bit address 0x60 (the driver passes the 8-bit form 0xC0)
  *
  * The XIT-SQR100 board settings taken from IT9300BDA.sys:
  *   - 24 MHz crystal (register 0x81 = 0x18 in the binary's X_pon)
  *   - XOSC_SEL = 0x04 (100 uA), XOSC_CAP_SET = 0x30 (12 pF)
- *   - LOOPFILTER_INTERNAL + OUTLMT_DTV_1_2Vpp (config flags 0x10004000)
+ *   - LOOPFILTER_INTERNAL + REFOUT_800mVpp (config flags 0x10004000)
  *   - tuner I2C 7-bit address 0x60 (the driver passes the 8-bit form 0xC0)
  *
  * The FREIA part has no standalone LNA enable bit; the RFIN/LNA state is
@@ -53,11 +53,12 @@ struct cxd6866_config {
 	 */
 	bool loop_filter_internal;
 	/*
-	 * SONY_FREIA_CONFIG_OUTLMT_DTV_1_2Vpp (0x00004000): limit the
-	 * digital IF output amplitude to 1.2 Vpp.  Set by the XIT-SQR100
-	 * Windows driver.
+	 * SONY_FREIA_CONFIG_OUTLMT_DTV_1_2Vpp (0x00040000): limit the
+	 * digital IF output amplitude to 1.2 Vpp.
 	 */
 	bool outlmt_dtv_1_2vpp;
+	/* REFOUT_800mVpp (0x00004000): 基準クロックを 800 mVp-p で出力する。 */
+	bool refout_enable;
 };
 
 enum cxd6866_system {

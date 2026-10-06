@@ -663,6 +663,7 @@ PxMltDevice::PxMltReceiver::PxMltReceiver(PxMltDevice &parent, std::uintptr_t in
 	cxd2856er_.i2c_addr.slvt = i2c_addr;
 	cxd2856er_.config.xtal = 24000;
 	cxd2856er_.config.tuner_i2c = true;
+	cxd2856er_.config.serial_ts_clock = false;
 
 	cxd2858er_.dev = dev;
 	cxd2858er_.i2c = &cxd2856er_.i2c_master;

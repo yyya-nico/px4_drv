@@ -222,15 +222,27 @@ static int cxd2856er_set_ts_clock(struct cxd2856er_demod *demod,
 	if (ret)
 		return ret;
 
-	ret = cxd2856er_write_slvt_reg_mask(demod, 0xc4, 0x00, 0x03);
+	/*
+	 * PXMLT の既存 TS 設定を既定とし、XIT-SQR100 は
+	 * Windows 実機キャプチャと同じ continuous clock を使用する。
+	 * ISDB-T は high half rate、ISDB-S は mid full rate。
+	 */
+	ret = cxd2856er_write_slvt_reg_mask(demod, 0xc4,
+		(demod->config.serial_ts_clock) ?
+		((system == CXD2856ER_ISDB_T_SYSTEM) ? 0x02 : 0x01) : 0x00,
+		0x03);
 	if (ret)
 		return ret;
 
-	ret = cxd2856er_write_slvt_reg_mask(demod, 0xd1, 0x02, 0x03);
+	ret = cxd2856er_write_slvt_reg_mask(demod, 0xd1,
+		(demod->config.serial_ts_clock &&
+		 system == CXD2856ER_ISDB_S_SYSTEM) ? 0x01 : 0x02, 0x03);
 	if (ret)
 		return ret;
 
-	ret = cxd2856er_write_slvt_reg(demod, 0xd9, 0x10);
+	ret = cxd2856er_write_slvt_reg(demod, 0xd9,
+		(demod->config.serial_ts_clock &&
+		 system == CXD2856ER_ISDB_S_SYSTEM) ? 0x08 : 0x10);
 	if (ret)
 		return ret;
 
@@ -240,11 +252,13 @@ static int cxd2856er_set_ts_clock(struct cxd2856er_demod *demod,
 
 	switch (system) {
 	case CXD2856ER_ISDB_T_SYSTEM:
-		ret = cxd2856er_write_slvt_reg_mask(demod, 0x33, 0x02, 0x03);
+		ret = cxd2856er_write_slvt_reg_mask(demod, 0x33,
+			(demod->config.serial_ts_clock) ? 0x00 : 0x02, 0x03);
 		break;
 
 	case CXD2856ER_ISDB_S_SYSTEM:
-		ret = cxd2856er_write_slvt_reg_mask(demod, 0x33, 0x00, 0x03);
+		ret = cxd2856er_write_slvt_reg_mask(demod, 0x33,
+			(demod->config.serial_ts_clock) ? 0x01 : 0x00, 0x03);
 		break;
 
 	default:

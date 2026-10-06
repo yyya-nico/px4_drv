@@ -51,6 +51,12 @@ foreach ($build_platform in $build_platforms) {
     }
     & 'tests/ts_sync_condition_test.ps1' -Platform $build_platform
 
+    # XIT-SQR100 の USB 分割境界と選局時の端数破棄を検証
+    msbuild tests/xit_ts_framer_test.vcxproj /t:"Rebuild" /p:"Configuration=Release-static;Platform=$build_platform;PlatformToolset=v143"
+    if ($LASTEXITCODE -ne 0) { throw "XIT TS framer test build failed. platform: $build_platform" }
+    & "build/$build_platform/Release-static/xit_ts_framer_test.exe"
+    if ($LASTEXITCODE -ne 0) { throw "XIT TS framer test failed. platform: $build_platform" }
+
     # 実機に依存しないカード抜去・再挿入・接触不良の状態遷移を毎回検証
     & "build/$build_platform/Release-static/smart_card_state_test.exe"
     if ($LASTEXITCODE -ne 0) {
@@ -208,6 +214,20 @@ Copy-Item pkg/BonDriver_PX4/BonDriver_PX4-T.ChSet.txt dist/BonDriver_PX-S1UR_64b
 Copy-Item build/x64/Release-static/DriverHost_PX4.exe dist/BonDriver_PX-S1UR_64bit/DriverHost_PX4.exe
 Copy-Item pkg/DriverHost_PX4/DriverHost_PX4.ini dist/BonDriver_PX-S1UR_64bit/DriverHost_PX4.ini
 Copy-Item pkg/DriverHost_PX4/it930x-firmware.bin dist/BonDriver_PX-S1UR_64bit/it930x-firmware.bin
+
+# XIT-SQR100 の地デジ・衛星共用 BonDriver を配置
+foreach ($xit_platform in @('x86', 'x64')) {
+    $xit_bits = if ($xit_platform -eq 'x86') { '32bit' } else { '64bit' }
+    $xit_dist = "dist/BonDriver_XIT-SQR100_$xit_bits"
+    New-Item -ItemType Directory $xit_dist
+    Copy-Item "build/$xit_platform/Release-static/BonDriver_PX4.dll" "$xit_dist/BonDriver_XIT-SQR100.dll"
+    Copy-Item 'pkg/BonDriver_PX4/BonDriver_XIT-SQR100.ini' $xit_dist
+    Copy-Item 'pkg/BonDriver_PX4/BonDriver_PX4-T.ChSet.txt' $xit_dist
+    Copy-Item 'pkg/BonDriver_PX4/BonDriver_PX4-S.ChSet.txt' $xit_dist
+    Copy-Item "build/$xit_platform/Release-static/DriverHost_PX4.exe" $xit_dist
+    Copy-Item 'pkg/DriverHost_PX4/DriverHost_PX4.ini' $xit_dist
+    Copy-Item 'pkg/DriverHost_PX4/it930x-firmware.bin' $xit_dist
+}
 
 # 各 BonDriver と同じビット数の WinSCard.dll を配置
 # WinUSB 版の全対応機種で内蔵カードリーダーを利用できる

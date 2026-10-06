@@ -14,7 +14,7 @@
  *
  *   - config flags 0x10004000:
  *       SONY_FREIA_CONFIG_LOOPFILTER_INTERNAL (0x10000000)
- *       SONY_FREIA_CONFIG_OUTLMT_DTV_1_2Vpp  (0x00004000)
+ *       SONY_FREIA_CONFIG_REFOUT_800mVpp    (0x00004000)
  *   - tuner I2C 7-bit address 0x60 (8-bit form 0xC0)
  *   - 24 MHz crystal (register 0x81 = 0x18 in the binary's X_pon)
  *   - XOSC_SEL = 0x04 (100 uA), XOSC_CAP_SET = 0x30 (12 pF)
@@ -159,7 +159,7 @@ static int cxd6866_detect(struct cxd6866_tuner *tuner)
  * Uses the XIT-SQR100 config:
  *   - power save (terrestrial)  = NORMAL_MATCHING_DISABLE  (default)
  *   - power save (satellite)    = SAT_NORMAL               (default)
- *   - no REFOUT, no EXT_REF, no IFOUT_DC_BIAS_500mV, no SAT_LOW_GAIN
+ *   - REFOUT from board config, no EXT_REF, no IFOUT_DC_BIAS_500mV, no SAT_LOW_GAIN
  *   - crystal frequency from config.xtal (XIT-SQR100: 24 MHz -> 0x18)
  *   - crystal driver current XOSC_SEL = 0x04 (100 uA)
  *   - crystal load cap XOSC_CAP_SET = 0x30 (12 pF, per IT9300BDA.sys)
@@ -236,8 +236,12 @@ static int cxd6866_x_pon(struct cxd6866_tuner *tuner)
 	 * reference driver uses 0x1E (7.5 pF, for a 6 pF crystal). */
 	data[1] = (u8)(0x80 | 0x04);
 	data[2] = (u8)(0x80 | 0x30);
-	/* REFOUT disabled (0x84) */
-	data[3] = 0x00;
+	/*
+	 * XIT-SQR100 の Windows USB キャプチャでは REFOUT (0x84) は
+	 * 0x83。無効値 0x00 では、後続の SLVT 操作に必要な基準
+	 * クロックを止める可能性があるため、基板設定に従って 800 mVp-p で出力する。
+	 */
+	data[3] = (tuner->config.refout_enable) ? 0x83 : 0x00;
 	/* GPIO0 / GPIO1 port setting (0x85, 0x86) */
 	data[4] = 0x00;
 	data[5] = 0x00;

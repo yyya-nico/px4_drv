@@ -32,6 +32,7 @@ struct it930x_priv {
 	struct mutex gpio_lock;
 	u8 *buf;
 	u8 seq;
+	bool bcas_extended;
 	struct it930x_i2c_master_info i2c[3];
 	struct it930x_gpio_state status[16];
 };
@@ -1206,19 +1207,91 @@ int it930x_bcas_init(struct it930x_bridge *it930x)
 		return ret;
 
 	/* カード検出は頻繁に呼ばれるため GPIO H6 の入力設定は初期化時に済ませる */
-	return it930x_set_gpio_mode(it930x, 6, IT930X_GPIO_IN, true);
+	ret = it930x_set_gpio_mode(it930x, 6, IT930X_GPIO_IN, true);
+	if (!ret)
+		((struct it930x_priv *)it930x->priv)->bcas_extended = false;
+	return ret;
+}
+
+/* XIT-SQR100 のキャプチャで確認した拡張 UART / H15 検出の入口。 */
+int it930x_bcas_init_extended(struct it930x_bridge *it930x)
+{
+	u8 mode = 2;
+	struct it930x_ctrl_buf write_buf = { &mode, 1 };
+	struct it930x_priv *priv = it930x->priv;
+	int ret;
+
+	ret = it930x_ctrl_msg(it930x, IT930X_CMD_UART_SET_MODE,
+			     &write_buf, NULL, NULL, false);
+	if (ret)
+		return ret;
+	/* mode 5 はキャプチャの後続設定。暗号鍵の設定は対象外。 */
+	mode = 5;
+	ret = it930x_ctrl_msg(it930x, IT930X_CMD_UART_SET_MODE,
+			     &write_buf, NULL, NULL, false);
+	if (ret)
+		return ret;
+	ret = it930x_set_gpio_mode(it930x, 15, IT930X_GPIO_IN, true);
+	if (!ret)
+		priv->bcas_extended = true;
+	return ret;
+}
+
+static int it930x_bcas_rx_length(struct it930x_bridge *it930x, u16 *len)
+{
+	struct it930x_priv *priv = it930x->priv;
+	u8 data[2];
+	int ret;
+
+	if (priv->bcas_extended) {
+		/* 拡張経路の受信長は 0x4956 の big-endian 2-byte 値。 */
+		u8 request[] = { 2, 2, 0, 0, 0x49, 0x56 };
+		struct it930x_ctrl_buf wb = { request, sizeof(request) };
+		struct it930x_ctrl_buf rb = { data, sizeof(data) };
+
+		ret = it930x_ctrl_msg(it930x, IT930X_CMD_REG_READ,
+				      &wb, &rb, NULL, false);
+		if (ret)
+			return ret;
+		/* 短い応答の未初期化 byte を受信長として使わない。 */
+		if (rb.len != sizeof(data))
+			return -EBADMSG;
+		*len = ((u16)data[0] << 8) | data[1];
+	} else {
+		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, data);
+		if (!ret)
+			*len = data[0];
+	}
+	return ret;
 }
 
 int it930x_bcas_reset_card(struct it930x_bridge *it930x)
 {
+	struct it930x_priv *priv = it930x->priv;
+	int gpio = priv->bcas_extended ? 1 : 14;
 	int ret;
 
+	if (priv->bcas_extended) {
+		/* 拡張経路は初期速度を設定してから H1 をパルスする。 */
+		ret = it930x_set_uart_baudrate(it930x, IT930X_UART_BAUDRATE_9600);
+		if (ret)
+			return ret;
+		ret = it930x_set_gpio_mode(it930x, gpio, IT930X_GPIO_OUT, true);
+		if (ret)
+			return ret;
+		ret = it930x_write_gpio(it930x, gpio, false);
+		if (ret)
+			return ret;
+		msleep(5);
+		return it930x_write_gpio(it930x, gpio, true);
+	}
+
 	/* B-CAS のリセット線は GPIO H14 に接続されている */
-	ret = it930x_set_gpio_mode(it930x, 14, IT930X_GPIO_OUT, true);
+	ret = it930x_set_gpio_mode(it930x, gpio, IT930X_GPIO_OUT, true);
 	if (ret)
 		return ret;
 
-	ret = it930x_write_gpio(it930x, 14, false);
+	ret = it930x_write_gpio(it930x, gpio, false);
 	if (ret)
 		return ret;
 
@@ -1232,7 +1305,7 @@ int it930x_bcas_reset_card(struct it930x_bridge *it930x)
 		return ret;
 
 	msleep(5);
-	return it930x_write_gpio(it930x, 14, true);
+	return it930x_write_gpio(it930x, gpio, true);
 }
 
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
@@ -1242,6 +1315,14 @@ int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
 
 	if (!ready)
 		return -EINVAL;
+
+	if (((struct it930x_priv *)it930x->priv)->bcas_extended) {
+		u16 len;
+		ret = it930x_bcas_rx_length(it930x, &len);
+		if (!ret)
+			*ready = len != 0;
+		return ret;
+	}
 
 	ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_READY, &value);
 	if (ret)
@@ -1262,13 +1343,12 @@ int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 
 	capacity = *len;
 	while (total < capacity) {
-		u8 available;
+		u16 available;
 		u8 read_len;
 		struct it930x_ctrl_buf write_buf;
 		struct it930x_ctrl_buf read_buf;
 
-		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH,
-				      &available);
+		ret = it930x_bcas_rx_length(it930x, &available);
 		if (ret)
 			return ret;
 		if (!available)
@@ -1303,6 +1383,13 @@ int it930x_bcas_send_data(struct it930x_bridge *it930x, const u8 *buf, u8 len)
 
 	if (!buf || !len)
 		return -EINVAL;
+
+	if (((struct it930x_priv *)it930x->priv)->bcas_extended) {
+		/* 拡張経路は各フレームの送信前に 0x4953 をクリアする。 */
+		int ret = it930x_write_reg(it930x, 0x4953, 0);
+		if (ret)
+			return ret;
+	}
 
 	while (offset < len) {
 		u8 write_len = (len - offset < 48) ? len - offset : 48;
@@ -1339,8 +1426,10 @@ int it930x_bcas_detect_card(struct it930x_bridge *it930x, bool *detected)
 	if (!detected)
 		return -EINVAL;
 
-	/* カード検出スイッチは GPIO H6 の Low Active 入力 */
-	ret = it930x_read_gpio(it930x, 6, detected);
+	/* 検出スイッチは通常 H6、拡張 H15 の Low Active 入力。 */
+	ret = it930x_read_gpio(it930x,
+		((struct it930x_priv *)it930x->priv)->bcas_extended ? 15 : 6,
+		detected);
 	if (ret)
 		return ret;
 

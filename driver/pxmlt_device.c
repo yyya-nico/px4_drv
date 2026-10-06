@@ -910,6 +910,7 @@ static int pxmlt_device_load_config(struct pxmlt_device *pxmlt,
 		chrdevm->cxd2856er.i2c_addr.slvt = input->i2c_addr;
 		chrdevm->cxd2856er.config.xtal = 24000;
 		chrdevm->cxd2856er.config.tuner_i2c = true;
+		chrdevm->cxd2856er.config.serial_ts_clock = false;
 
 		chrdevm->cxd2858er.dev = dev;
 		chrdevm->cxd2858er.i2c = &chrdevm->cxd2856er.i2c_master;
