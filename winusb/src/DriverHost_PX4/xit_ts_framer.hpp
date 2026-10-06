@@ -25,7 +25,7 @@ public:
 				synced_ = false;
 			}
 			const std::size_t target = synced_ ? 188 : sizeof(pending_);
-			const auto count = std::min(length, target - size_);
+			const auto count = (std::min)(length, target - size_);
 			std::memcpy(pending_ + size_, data, count);
 			size_ += count; data += count; length -= count;
 			if (size_ < target)

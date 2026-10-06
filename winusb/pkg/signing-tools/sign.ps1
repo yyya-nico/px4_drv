@@ -37,7 +37,18 @@ Get-ChildItem -LiteralPath $InfPath -Filter '*.inf' -File | ForEach-Object {
         $normalized_stream.Dispose()
     }
 
-    if (-not [System.Linq.Enumerable]::SequenceEqual[byte]($source_bytes, $normalized_bytes)) {
+    # Windows PowerShell 5.1 でも動作するよう、型引数の明示を必要とするメソッド呼び出しを避ける
+    $bytes_equal = $source_bytes.Length -eq $normalized_bytes.Length
+    if ($bytes_equal) {
+        for ($index = 0; $index -lt $source_bytes.Length; $index++) {
+            if ($source_bytes[$index] -ne $normalized_bytes[$index]) {
+                $bytes_equal = $false
+                break
+            }
+        }
+    }
+
+    if (-not $bytes_equal) {
         [System.IO.File]::WriteAllBytes($_.FullName, $normalized_bytes)
         Write-Host "Driver INF line endings normalized: $($_.Name)"
     }
