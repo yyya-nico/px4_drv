@@ -57,6 +57,12 @@ foreach ($build_platform in $build_platforms) {
     & "build/$build_platform/Release-static/xit_ts_framer_test.exe"
     if ($LASTEXITCODE -ne 0) { throw "XIT TS framer test failed. platform: $build_platform" }
 
+    # 選局中の TS バッファ破棄後も配信が継続し、終了要求で回収できることを検証
+    msbuild tests/stream_buffer_retune_test.vcxproj /p:"Configuration=Release-static;Platform=$build_platform;PlatformToolset=v143"
+    if ($LASTEXITCODE -ne 0) { throw "Stream buffer retune test build failed. platform: $build_platform" }
+    & "build/$build_platform/Release-static/stream_buffer_retune_test.exe"
+    if ($LASTEXITCODE -ne 0) { throw "Stream buffer retune test failed. platform: $build_platform" }
+
     # 実機に依存しないカード抜去・再挿入・接触不良の状態遷移を毎回検証
     & "build/$build_platform/Release-static/smart_card_state_test.exe"
     if ($LASTEXITCODE -ne 0) {

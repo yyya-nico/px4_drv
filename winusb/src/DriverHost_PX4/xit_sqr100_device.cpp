@@ -345,7 +345,7 @@ int XitSqr100Device::Receiver::SetFrequency()
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 	if (!parent_.available_ || !open_ || parent_.terminating_) return -ENODEV;
 	/* 選局前に USB を回収し、旧チャンネルの TS と端数を破棄する。 */
-	int ret = SetCapture(false);
+	int ret = PauseCapture();
 	if (ret) return ret;
 	system_ = SystemType::UNSPECIFIED;
 	cxd2856er_system_params parameters = {};
@@ -367,7 +367,7 @@ int XitSqr100Device::Receiver::SetStreamId()
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 	if (!parent_.available_ || !open_ || parent_.terminating_) return -ENODEV;
 	if (params_.system != SystemType::ISDB_S || params_.stream_id > UINT16_MAX) return -EINVAL;
-	int ret = SetCapture(false);
+	int ret = PauseCapture();
 	if (ret) return ret;
 	return params_.stream_id < 12 ? cxd2856er_set_slot_isdbs(&demod_, static_cast<u16>(params_.stream_id)) :
 		cxd2856er_set_tsid_isdbs(&demod_, static_cast<u16>(params_.stream_id));
@@ -398,25 +398,37 @@ int XitSqr100Device::Receiver::SetLnbVoltage(std::int32_t voltage)
 	return voltage == 0 ? 0 : -ENOSYS;
 }
 
+int XitSqr100Device::Receiver::PauseCapture()
+{
+	/* 選局中もパイプ配信スレッドを維持するため、StreamBuffer::Stop は終了時だけ使う。 */
+	int ret = streaming_ ? itedtv_bus_stop_streaming(&parent_.bridge_.bus) : 0;
+	streaming_ = false;
+	if (!stream_buf_->Purge() && !ret) ret = -EIO;
+	parent_.framer_.Reset();
+	return ret;
+}
+
 int XitSqr100Device::Receiver::SetCapture(bool capture)
 {
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 	if (!capture) {
-		int ret = streaming_ ? itedtv_bus_stop_streaming(&parent_.bridge_.bus) : 0;
-		streaming_ = false;
+		int ret = PauseCapture();
 		stream_buf_->Stop();
-		stream_buf_->Purge();
-		parent_.framer_.Reset();
+		buffer_started_ = false;
 		return ret;
 	}
 	if (!parent_.available_ || !open_ || parent_.terminating_) return -ENODEV;
 	if (streaming_) return 0;
 	int ret = it930x_purge_psb(&parent_.bridge_, parent_.purge_timeout_);
 	if (ret) return ret;
-	const std::size_t bytes = 188 * parent_.buffer_packets_;
-	if (!stream_buf_->Alloc(bytes)) return -ENOMEM;
-	stream_buf_->SetThresholdSize(bytes / 10);
-	stream_buf_->Start();
+	/* 選局時はバッファを停止しないため、確保と開始は最初のキャプチャに限る。 */
+	if (!buffer_started_) {
+		const std::size_t bytes = 188 * parent_.buffer_packets_;
+		if (!stream_buf_->Alloc(bytes)) return -ENOMEM;
+		stream_buf_->SetThresholdSize(bytes / 10);
+		stream_buf_->Start();
+		buffer_started_ = true;
+	}
 	parent_.framer_.Reset();
 	auto &usb = parent_.bridge_.bus.usb;
 	usb.streaming.urb_buffer_size = 188 * parent_.urb_packets_;
@@ -424,7 +436,7 @@ int XitSqr100Device::Receiver::SetCapture(bool capture)
 	usb.streaming.no_dma = true;
 	usb.streaming.no_raw_io = parent_.no_raw_io_;
 	ret = itedtv_bus_start_streaming(&parent_.bridge_.bus, StreamHandler, &parent_);
-	if (ret) { stream_buf_->Stop(); return ret; }
+	if (ret) return ret;
 	streaming_ = true;
 	return 0;
 }

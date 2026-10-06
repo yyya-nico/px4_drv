@@ -46,10 +46,12 @@ private:
 		int SetFrequency() override;
 		int SetStreamId() override;
 	private:
+		int PauseCapture();
 		XitSqr100Device &parent_;
 		std::condition_variable_any close_cond_;
 		bool open_ = false;
 		bool streaming_ = false;
+		bool buffer_started_ = false;
 		SystemType system_ = SystemType::UNSPECIFIED;
 		cxd2856er_demod demod_ = {};
 		cxd6866_tuner tuner_ = {};
