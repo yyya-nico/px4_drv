@@ -173,8 +173,8 @@ int XitSqr100Device::DetectCard(bool &detected)
 	if (!available_ || !initialized_ || terminating_) return -ENODEV;
 	/* カード未接続時の状態監視でも、UART 初期化や電源投入は不要。 */
 	int ret = it930x_set_gpio_mode(&bridge_, 15, IT930X_GPIO_IN, true);
+	/* H15 はカード挿入時に High となるため、通常機種の検出極性を適用しない。 */
 	if (!ret) ret = it930x_read_gpio(&bridge_, 15, &detected);
-	if (!ret) detected = !detected;
 	return ret;
 }
 
