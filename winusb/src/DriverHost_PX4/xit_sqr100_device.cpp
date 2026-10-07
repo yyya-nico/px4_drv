@@ -92,6 +92,12 @@ int XitSqr100Device::Init()
 	if (!ret)
 		ret = it930x_write_gpio(&bridge_, 2, false);
 
+	if (!ret)
+		ret = it930x_set_gpio_mode(&bridge_, 7, IT930X_GPIO_OUT, true);
+
+	if (!ret)
+		ret = it930x_write_gpio(&bridge_, 7, true);
+
 	if (ret) {
 		it930x_term(&bridge_);
 		itedtv_bus_term(&bridge_.bus);
@@ -186,14 +192,7 @@ int XitSqr100Device::OpenCard()
 		return ret;
 	}
 
-	/* XIT-SQR100 は ATR を受信するために、カード初期化後に H7 を出力 Low に設定する。 */
-	ret = it930x_set_gpio_mode(&bridge_, 7, IT930X_GPIO_OUT, true);
-	if (ret) {
-		if (!receiver_open_)
-			SetBackendPower(false);
-		return ret;
-	}
-
+	/* XIT-SQR100 は ATR を受信するために、GPIO H7 を出力 Low に設定する。 */
 	ret = it930x_write_gpio(&bridge_, 7, false);
 	if (ret) {
 		if (!receiver_open_)
