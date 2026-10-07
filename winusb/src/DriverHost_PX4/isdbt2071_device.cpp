@@ -12,6 +12,9 @@
 
 namespace px4 {
 
+/* カード検出とリセットの配線・検出極性は機種側で定義する。 */
+static const it930x_bcas_config bcas_config = { 6, 14, false };
+
 Isdbt2071Device::Isdbt2071Device(const std::wstring &path, const px4::DeviceDefinition &device_def, std::uintptr_t index, px4::ReceiverManager &receiver_manager)
 	: DeviceBase(path, device_def, index, receiver_manager),
 	model_(Isdbt2071DeviceModel::ISDBT2071),
@@ -250,7 +253,7 @@ int Isdbt2071Device::OpenCard()
 			return ret;
 	}
 
-	int ret = it930x_bcas_init(&it930x_);
+	int ret = it930x_bcas_init(&it930x_, &bcas_config);
 	if (ret) {
 		if (!receiver_open_)
 			SetBackendPower(false);
@@ -276,13 +279,13 @@ void Isdbt2071Device::CloseCard()
 int Isdbt2071Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ ? it930x_bcas_detect_card(&it930x_, &detected) : -ENODEV;
+	return card_open_ && available_ ? it930x_bcas_detect_card(&it930x_, &bcas_config, &detected) : -ENODEV;
 }
 
 int Isdbt2071Device::ResetCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ ? it930x_bcas_reset_card(&it930x_) : -ENODEV;
+	return card_open_ ? it930x_bcas_reset_card(&it930x_, &bcas_config) : -ENODEV;
 }
 
 int Isdbt2071Device::SetCardBaudrate(::it930x_uart_baudrate baudrate)
