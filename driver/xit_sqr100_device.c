@@ -901,6 +901,14 @@ int xit_sqr100_device_init(struct xit_sqr100_device *xit, struct device *dev,
 	if (ret)
 		goto fail_device;
 
+	ret = it930x_set_gpio_mode(it930x, 7, IT930X_GPIO_OUT, true);
+	if (ret)
+		goto fail_device;
+
+	ret = it930x_write_gpio(it930x, 7, true);
+	if (ret)
+		goto fail_device;
+
 	if (px4_device_params.discard_null_packets) {
 		struct it930x_pid_filter filter;
 
