@@ -1217,7 +1217,8 @@ int it930x_bcas_init(struct it930x_bridge *it930x,
 	if (ret)
 		return ret;
 
-	/* カード検出は頻繁に呼ばれるため入力設定は初期化時に済ませる */
+	/* カード検出は頻繁に呼ばれるため GPIO H6 の入力設定は初期化時に済ませる */
+	/* XIT-SQR100 では GPIO H15 を入力設定 */
 	ret = it930x_set_gpio_mode(it930x, config->detect_gpio, IT930X_GPIO_IN, true);
 	return ret;
 }
@@ -1230,6 +1231,8 @@ int it930x_bcas_reset_card(struct it930x_bridge *it930x,
 	if (!it930x_bcas_config_valid(config))
 		return -EINVAL;
 
+	/* B-CAS のリセット線は GPIO H14 に接続されている */
+	/* XIT-SQR100 では GPIO H1 に接続 */
 	ret = it930x_set_gpio_mode(it930x, config->reset_gpio, IT930X_GPIO_OUT, true);
 	if (ret)
 		return ret;
