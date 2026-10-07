@@ -6,10 +6,12 @@
 #include <memory>
 #include "cxd2856er.h"
 #include "cxd6866.h"
-#include "xit_ts_framer.hpp"
 #include "device_base.hpp"
 
 namespace px4 {
+
+#define XIT_SQR100_DEVICE_TS_SYNC_COUNT	4
+#define XIT_SQR100_DEVICE_TS_SYNC_SIZE	(188 * XIT_SQR100_DEVICE_TS_SYNC_COUNT)
 
 /* 地デジ・衛星で1基の受信機を共用し、カード利用も電源を保持する。 */
 class XitSqr100Device final : public DeviceBase {
@@ -35,8 +37,9 @@ private:
 	struct StreamContext final {
 		/* 終了待機で Receiver を解放する間も、抜去通知と受信コールバックから参照する。 */
 		std::shared_ptr<ReceiverBase::StreamBuffer> stream_buf;
-		/* TS の端数と同期状態は framer に保持し、キャプチャ開始・終了時に初期化する。 */
-		XitTsFramer framer;
+		/* USB 入力間の端数を保持し、キャプチャ開始・終了時に破棄する。 */
+		std::uint8_t remain_buf[XIT_SQR100_DEVICE_TS_SYNC_SIZE] = {};
+		std::size_t remain_len = 0;
 	};
 
 	class Receiver final : public ReceiverBase {
@@ -64,6 +67,7 @@ private:
 	};
 	void LoadConfig();
 	int SetBackendPower(bool state);
+	static void StreamProcess(std::shared_ptr<ReceiverBase::StreamBuffer> stream_buf, std::uint8_t **buf, std::size_t &len);
 	static int StreamHandler(void *context, void *data, std::uint32_t size);
 
 	std::recursive_mutex lock_;

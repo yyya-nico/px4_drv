@@ -7,6 +7,7 @@
 #include <iterator>
 
 #include "util.hpp"
+#include "ts_sync.h"
 
 namespace px4 {
 
@@ -296,16 +297,87 @@ int XitSqr100Device::SetBackendPower(bool state)
 	return 0;
 }
 
-int XitSqr100Device::StreamHandler(void *context, void *data, std::uint32_t size)
+void XitSqr100Device::StreamProcess(std::shared_ptr<px4::ReceiverBase::StreamBuffer> stream_buf, std::uint8_t **buf, std::size_t &len)
 {
-	auto &device = *static_cast<XitSqr100Device *>(context);
-	StreamContext &stream_ctx = device.stream_ctx_;
+	std::uint8_t *p = *buf;
+	std::size_t remain = len;
 
-	stream_ctx.framer.Feed(static_cast<const std::uint8_t *>(data), size,
-		[&](const std::uint8_t *packets, std::size_t bytes) {
-			stream_ctx.stream_buf->Write(packets, bytes);
-		});
-	stream_ctx.stream_buf->NotifyWrite();
+	while (remain) {
+		std::size_t i = 0;
+		bool sync_remain = false;
+
+		while (true) {
+			if (((i + 1) * 188) <= remain) {
+				/* 連続する同期バイトを数え、崩れた位置の直前までを出力する */
+				if (!px4_ts_has_plain_sync(p[i * 188]))
+					break;
+			} else {
+				sync_remain = true;
+				break;
+			}
+			i++;
+		}
+
+		if (i < XIT_SQR100_DEVICE_TS_SYNC_COUNT) {
+			p++;
+			remain--;
+			continue;
+		}
+
+		std::size_t pkt_len = 188 * i;
+		stream_buf->Write(p, pkt_len);
+
+		p += 188 * i;
+		remain -= 188 * i;
+
+		if (sync_remain)
+			break;
+	}
+
+	stream_buf->NotifyWrite();
+
+	*buf = p;
+	len = remain;
+
+	return;
+}
+
+int XitSqr100Device::StreamHandler(void *context, void *buf, std::uint32_t len)
+{
+	XitSqr100Device &obj = *static_cast<XitSqr100Device*>(context);
+	StreamContext &stream_ctx = obj.stream_ctx_;
+	std::uint8_t *p = static_cast<std::uint8_t*>(buf);
+	std::size_t remain = len;
+
+	if (stream_ctx.remain_len) {
+		if ((stream_ctx.remain_len + len) >= XIT_SQR100_DEVICE_TS_SYNC_SIZE) {
+			std::uint8_t * remain_buf = stream_ctx.remain_buf;
+			std::size_t t = XIT_SQR100_DEVICE_TS_SYNC_SIZE - stream_ctx.remain_len;
+
+			memcpy(remain_buf + stream_ctx.remain_len, p, t);
+			stream_ctx.remain_len = XIT_SQR100_DEVICE_TS_SYNC_SIZE;
+
+			StreamProcess(stream_ctx.stream_buf, &remain_buf, stream_ctx.remain_len);
+			if (!stream_ctx.remain_len) {
+				p += t;
+				remain -= t;
+			}
+
+			stream_ctx.remain_len = 0;
+		} else {
+			memcpy(stream_ctx.remain_buf + stream_ctx.remain_len, p, len);
+			stream_ctx.remain_len += len;
+
+			return 0;
+		}
+	}
+
+	StreamProcess(stream_ctx.stream_buf, &p, remain);
+
+	if (remain) {
+		memcpy(stream_ctx.remain_buf, p, remain);
+		stream_ctx.remain_len = remain;
+	}
 
 	return 0;
 }
@@ -507,7 +579,7 @@ int XitSqr100Device::Receiver::SetCapture(bool capture)
 	if (!capture) {
 		int ret = streaming_ ? itedtv_bus_stop_streaming(&parent_.bridge_.bus) : 0;
 		streaming_ = false;
-		parent_.stream_ctx_.framer.Reset();
+		parent_.stream_ctx_.remain_len = 0;
 		stream_buf_->Stop();
 		buffer_started_ = false;
 		return ret;
@@ -533,7 +605,8 @@ int XitSqr100Device::Receiver::SetCapture(bool capture)
 		buffer_started_ = true;
 	}
 
-	parent_.stream_ctx_.framer.Reset();
+	/* USB 開始前に旧キャプチャの端数を破棄し、別の受信へ持ち越さない。 */
+	parent_.stream_ctx_.remain_len = 0;
 
 	auto &usb = parent_.bridge_.bus.usb;
 	usb.streaming.urb_buffer_size = 188 * parent_.urb_packets_;

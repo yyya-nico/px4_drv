@@ -313,7 +313,6 @@
     <ClInclude Include="isdb2056_device.hpp" />
     <ClInclude Include="isdbt2071_device.hpp" />
     <ClInclude Include="xit_sqr100_device.hpp" />
-    <ClInclude Include="xit_ts_framer.hpp" />
     <ClInclude Include="cxd2856er_cn_table.hpp" />
     <ClInclude Include="misc_win.h" />
     <ClInclude Include="notify_icon.hpp" />

@@ -230,9 +230,6 @@
     <ClInclude Include="xit_sqr100_device.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="xit_ts_framer.hpp">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="cxd2856er_cn_table.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>

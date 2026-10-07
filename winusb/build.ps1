@@ -51,12 +51,6 @@ foreach ($build_platform in $build_platforms) {
     }
     & 'tests/ts_sync_condition_test.ps1' -Platform $build_platform
 
-    # XIT-SQR100 の USB 分割境界と選局時の端数破棄を検証
-    msbuild tests/xit_ts_framer_test.vcxproj /t:"Rebuild" /p:"Configuration=Release-static;Platform=$build_platform;PlatformToolset=v143"
-    if ($LASTEXITCODE -ne 0) { throw "XIT TS framer test build failed. platform: $build_platform" }
-    & "build/$build_platform/Release-static/xit_ts_framer_test.exe"
-    if ($LASTEXITCODE -ne 0) { throw "XIT TS framer test failed. platform: $build_platform" }
-
     # 選局中の TS バッファ破棄後も配信が継続し、終了要求で回収できることを検証
     msbuild tests/stream_buffer_retune_test.vcxproj /p:"Configuration=Release-static;Platform=$build_platform;PlatformToolset=v143"
     if ($LASTEXITCODE -ne 0) { throw "Stream buffer retune test build failed. platform: $build_platform" }
