@@ -1358,6 +1358,8 @@ int it930x_bcas_detect_card(struct it930x_bridge *it930x,
 	if (!detected || !it930x_bcas_config_valid(config))
 		return -EINVAL;
 
+	/* カード検出スイッチは GPIO H6 の Low Active 入力 */
+	/* XIT-SQR100 では GPIO H15 の High Active 入力 */
 	ret = it930x_read_gpio(it930x, config->detect_gpio, &high);
 	if (ret)
 		return ret;
