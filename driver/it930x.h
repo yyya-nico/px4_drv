@@ -106,11 +106,16 @@ int it930x_set_pid_filter(struct it930x_bridge *it930x, int input_idx,
 int it930x_purge_psb(struct it930x_bridge *it930x, int timeout);
 int it930x_bcas_init(struct it930x_bridge *it930x);
 int it930x_bcas_init_extended(struct it930x_bridge *it930x);
+/* XIT-SQR100: 拡張 UART / GPIO を設定し、受信は通常 UART レジスタを使う。 */
+int it930x_bcas_init_xit_sqr100(struct it930x_bridge *it930x);
 int it930x_bcas_reset_card(struct it930x_bridge *it930x);
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready);
 int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len);
 int it930x_bcas_send_data(struct it930x_bridge *it930x, const u8 *buf, u8 len);
 int it930x_bcas_detect_card(struct it930x_bridge *it930x, bool *detected);
+/* XIT-SQR100: UART 初期化前も H15 の High Active 入力を検出できる。 */
+int it930x_bcas_detect_card_xit_sqr100(struct it930x_bridge *it930x,
+				    bool *detected);
 int it930x_bcas_set_baudrate(struct it930x_bridge *it930x,
 			     enum it930x_uart_baudrate baudrate);
 #ifdef __cplusplus

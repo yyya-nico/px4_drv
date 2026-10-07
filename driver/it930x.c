@@ -1197,6 +1197,7 @@ int it930x_bcas_init(struct it930x_bridge *it930x)
 {
 	u8 mode = 1;
 	struct it930x_ctrl_buf write_buf;
+	struct it930x_priv *priv = it930x->priv;
 	int ret;
 
 	write_buf.buf = &mode;
@@ -1209,7 +1210,7 @@ int it930x_bcas_init(struct it930x_bridge *it930x)
 	/* カード検出は頻繁に呼ばれるため GPIO H6 の入力設定は初期化時に済ませる */
 	ret = it930x_set_gpio_mode(it930x, 6, IT930X_GPIO_IN, true);
 	if (!ret)
-		((struct it930x_priv *)it930x->priv)->bcas_extended = false;
+		priv->bcas_extended = false;
 	return ret;
 }
 
@@ -1237,32 +1238,29 @@ int it930x_bcas_init_extended(struct it930x_bridge *it930x)
 	return ret;
 }
 
-static int it930x_bcas_rx_length(struct it930x_bridge *it930x, u16 *len)
+/* UART 設定に続く XIT-SQR100 固有の GPIO 初期状態。 */
+int it930x_bcas_init_xit_sqr100(struct it930x_bridge *it930x)
 {
-	struct it930x_priv *priv = it930x->priv;
-	u8 data[2];
 	int ret;
 
-	if (priv->bcas_extended) {
-		/* 拡張経路の受信長は 0x4956 の big-endian 2-byte 値。 */
-		u8 request[] = { 2, 2, 0, 0, 0x49, 0x56 };
-		struct it930x_ctrl_buf wb = { request, sizeof(request) };
-		struct it930x_ctrl_buf rb = { data, sizeof(data) };
+	ret = it930x_bcas_init_extended(it930x);
+	if (ret)
+		return ret;
 
-		ret = it930x_ctrl_msg(it930x, IT930X_CMD_REG_READ,
-				      &wb, &rb, NULL, false);
-		if (ret)
-			return ret;
-		/* 短い応答の未初期化 byte を受信長として使わない。 */
-		if (rb.len != sizeof(data))
-			return -EBADMSG;
-		*len = ((u16)data[0] << 8) | data[1];
-	} else {
-		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, data);
-		if (!ret)
-			*len = data[0];
-	}
-	return ret;
+	ret = it930x_set_gpio_mode(it930x, 7, IT930X_GPIO_OUT, true);
+	if (ret)
+		return ret;
+
+	ret = it930x_write_gpio(it930x, 7, false);
+	if (ret)
+		return ret;
+
+	ret = it930x_set_gpio_mode(it930x, 1, IT930X_GPIO_OUT, true);
+	if (ret)
+		return ret;
+
+	/* ATR を開始する High パルスは、後続の reset_card が担当する。 */
+	return it930x_write_gpio(it930x, 1, false);
 }
 
 int it930x_bcas_reset_card(struct it930x_bridge *it930x)
@@ -1271,22 +1269,6 @@ int it930x_bcas_reset_card(struct it930x_bridge *it930x)
 	int gpio = priv->bcas_extended ? 1 : 14;
 	int ret;
 
-	if (priv->bcas_extended) {
-		/* 拡張経路は初期速度を設定してから H1 をパルスする。 */
-		ret = it930x_set_uart_baudrate(it930x, IT930X_UART_BAUDRATE_9600);
-		if (ret)
-			return ret;
-		ret = it930x_set_gpio_mode(it930x, gpio, IT930X_GPIO_OUT, true);
-		if (ret)
-			return ret;
-		ret = it930x_write_gpio(it930x, gpio, false);
-		if (ret)
-			return ret;
-		msleep(5);
-		return it930x_write_gpio(it930x, gpio, true);
-	}
-
-	/* B-CAS のリセット線は GPIO H14 に接続されている */
 	ret = it930x_set_gpio_mode(it930x, gpio, IT930X_GPIO_OUT, true);
 	if (ret)
 		return ret;
@@ -1316,14 +1298,6 @@ int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
 	if (!ready)
 		return -EINVAL;
 
-	if (((struct it930x_priv *)it930x->priv)->bcas_extended) {
-		u16 len;
-		ret = it930x_bcas_rx_length(it930x, &len);
-		if (!ret)
-			*ready = len != 0;
-		return ret;
-	}
-
 	ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_READY, &value);
 	if (ret)
 		return ret;
@@ -1343,12 +1317,12 @@ int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 
 	capacity = *len;
 	while (total < capacity) {
-		u16 available;
+		u8 available;
 		u8 read_len;
 		struct it930x_ctrl_buf write_buf;
 		struct it930x_ctrl_buf read_buf;
 
-		ret = it930x_bcas_rx_length(it930x, &available);
+		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, &available);
 		if (ret)
 			return ret;
 		if (!available)
@@ -1426,14 +1400,26 @@ int it930x_bcas_detect_card(struct it930x_bridge *it930x, bool *detected)
 	if (!detected)
 		return -EINVAL;
 
-	/* 検出スイッチは通常 H6、拡張 H15 の Low Active 入力。 */
-	ret = it930x_read_gpio(it930x,
-		((struct it930x_priv *)it930x->priv)->bcas_extended ? 15 : 6,
-		detected);
+	ret = it930x_read_gpio(it930x, 6, detected);
 	if (ret)
 		return ret;
 
 	*detected = !*detected;
+	return 0;
+}
+
+int it930x_bcas_detect_card_xit_sqr100(struct it930x_bridge *it930x, bool *detected)
+{
+	int ret;
+
+	if (!detected)
+		return -EINVAL;
+
+	ret = it930x_read_gpio(it930x, 15, detected);
+	if (ret)
+		return ret;
+
+	/* XIT-SQR100 のカード検出は H15 の High Active 入力なので反転は不要。 */
 	return 0;
 }
 

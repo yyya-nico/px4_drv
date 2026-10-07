@@ -40,7 +40,8 @@ static u8 regs[65536], tx[256];
 static unsigned int writes[65536];
 static u16 available;
 static int fail_command = -1;
-static bool short_response, short_length;
+static int fail_register = -1;
+static bool short_response;
 static unsigned int uart_reads, max_read, mode_count;
 static u8 modes[8];
 static int mock_tx(struct itedtv_bus *bus, void *buf, int len)
@@ -48,6 +49,9 @@ static int mock_tx(struct itedtv_bus *bus, void *buf, int len)
 	(void)bus;
 	memcpy(tx, buf, len);
 	if (((tx[1] << 8) | tx[2]) == fail_command) return -EIO;
+	if (tx[2] == IT930X_CMD_REG_WRITE &&
+	    (((u32)tx[6] << 24) | ((u32)tx[7] << 16) | (tx[8] << 8) | tx[9]) ==
+	    (u32)fail_register) return -EIO;
 	if (tx[2] == IT930X_CMD_UART_SET_MODE) modes[mode_count++] = tx[4];
 	return 0;
 }
@@ -65,10 +69,8 @@ static int mock_rx(struct itedtv_bus *bus, void *buf, int *len)
 			memcpy(regs + reg, tx + 10, tx[4]); writes[reg]++;
 		} else {
 			count = tx[4];
-			if (reg == 0x4956) { regs[reg] = available >> 8; regs[reg+1] = available & 255; }
 			if (reg == IT930X_REG_UART_RX_LENGTH) regs[reg] = available;
 			memcpy(out + 3, regs + reg, count);
-			if (reg == 0x4956 && short_length) count--;
 		}
 	} else if (cmd == IT930X_CMD_UART_READ) {
 		count = tx[4]; assert(count <= available && count <= 32);
@@ -99,34 +101,57 @@ int main(void)
 	assert(it930x_bcas_init_extended(&bridge) == 0);
 	assert(mode_count == 2 && modes[0] == 2 && modes[1] == 5);
 	assert(regs[0xd8e8] == 0 && regs[0xd8e9] == 1);
-	regs[0xd8e6] = 0;
-	assert(it930x_bcas_detect_card(&bridge, &detected) == 0 && detected);
 	regs[0xd8e6] = 1;
-	assert(it930x_bcas_detect_card(&bridge, &detected) == 0 && !detected);
+	assert(it930x_bcas_detect_card_xit_sqr100(&bridge, &detected) == 0 && detected);
+	regs[0xd8e6] = 0;
+	assert(it930x_bcas_detect_card_xit_sqr100(&bridge, &detected) == 0 && !detected);
 	assert(it930x_bcas_reset_card(&bridge) == 0);
 	assert(writes[0xd8af] == 2 && regs[0xd8af] == 1);
-	assert(writes[0xd8e3] == 0 && writes[0x7904] == 0);
-	short_length = true;
-	assert(it930x_bcas_check_ready(&bridge, &ready) == -EBADMSG);
-	short_length = false;
-	/* 256以上の受信長と caller の容量を扱い、境界内で読み出す。 */
-	available = 300;
+	assert(writes[0xd8e3] == 0 && writes[0x7904] == 1 && regs[0x7904] == 2);
+	/* 1バイト受信長の上限と caller の容量を扱い、境界内で読み出す。 */
+	available = 255;
+	regs[IT930X_REG_UART_RX_READY] = 1;
 	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && ready);
 	len = sizeof(data);
 	assert(it930x_bcas_get_data(&bridge, data, &len) == 0);
-	assert(len == 255 && available == 45 && uart_reads == 8 && max_read == 32);
+	assert(len == 255 && available == 0 && uart_reads == 8 && max_read == 32);
+	available = 100; len = 65; data[65] = 0x5a;
+	assert(it930x_bcas_get_data(&bridge, data, &len) == 0);
+	assert(len == 65 && available == 35 && data[65] == 0x5a);
 	available = 3; short_response = true; len = sizeof(data);
 	assert(it930x_bcas_get_data(&bridge, data, &len) == -EBADMSG);
 	short_response = false;
 	assert(it930x_bcas_send_data(&bridge, data, 49) == 0);
 	assert(writes[0x4953] == 1 && writes[IT930X_REG_UART_REALSEND] == 1);
+	/* XIT-SQR100 は拡張 GPIO / 送信処理を保ち、受信途中の長さを完了扱いにしない。 */
+	assert(it930x_bcas_init_xit_sqr100(&bridge) == 0);
+	available = 13;
+	regs[IT930X_REG_UART_RX_READY] = 0;
+	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && !ready);
+	regs[IT930X_REG_UART_RX_READY] = 1;
+	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && ready);
+	len = sizeof(data);
+	assert(it930x_bcas_get_data(&bridge, data, &len) == 0 && len == 13);
+	assert(it930x_bcas_reset_card(&bridge) == 0);
+	assert(writes[0x7904] == 2 && regs[0x7904] == 2);
+	assert(writes[0xd8e3] == 0 && regs[0xd8af] == 1);
+	/* UART 初期化失敗後はカードを起動せず、Low のまま失敗を上位へ返す。 */
+	fail_register = 0x7904;
+	assert(it930x_bcas_reset_card(&bridge) == -EIO);
+	assert(regs[0xd8af] == 0 && writes[0x7904] == 2);
+	fail_register = -1;
+	fail_command = IT930X_CMD_REG_READ;
+	assert(it930x_bcas_check_ready(&bridge, &ready) == -EIO);
+	len = sizeof(data);
+	assert(it930x_bcas_get_data(&bridge, data, &len) == -EIO);
+	fail_command = -1;
 	/* 通常機種は H6 / H14 と既存 UART レジスタを使う。 */
 	assert(it930x_bcas_init(&bridge) == 0);
 	assert(!((struct it930x_priv *)bridge.priv)->bcas_extended);
 	regs[0xd8c6] = 0;
 	assert(it930x_bcas_detect_card(&bridge, &detected) == 0 && detected);
 	assert(it930x_bcas_reset_card(&bridge) == 0);
-	assert(writes[0xd8e3] == 2 && writes[0x7904] == 1);
+	assert(writes[0xd8e3] == 2 && writes[0x7904] == 3);
 	regs[IT930X_REG_UART_RX_READY] = 1;
 	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && ready);
 	assert(it930x_bcas_send_data(&bridge, data, 1) == 0 && writes[0x4953] == 1);

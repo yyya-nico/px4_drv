@@ -1,6 +1,7 @@
 // pxmlt_device.cpp
 
 #include "pxmlt_device.hpp"
+#include "cxd2856er_cn_table.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -587,56 +588,6 @@ int PxMltDevice::StreamHandler(void *context, void *buf, std::uint32_t len)
 	return 0;
 }
 
-const PxMltDevice::PxMltReceiver::PxMltReceiverCnTableIsdbS PxMltDevice::PxMltReceiver::isdbs_cn_table_[] = {
-	{ 0x5af, 0 }, { 0x597, 100 }, { 0x57e, 200 }, { 0x567, 300 },
-	{ 0x550, 400 }, { 0x539, 500 }, { 0x522, 600 }, { 0x50c, 700 },
-	{ 0x4f6, 800 }, { 0x4e1, 900 }, { 0x4cc, 1000 }, { 0x4b6, 1100 },
-	{ 0x4a1, 1200 }, { 0x48c, 1300 }, { 0x477, 1400 }, { 0x463, 1500 },
-	{ 0x44f, 1600 }, { 0x43c, 1700 }, { 0x428, 1800 }, { 0x416, 1900 },
-	{ 0x403, 2000 }, { 0x3ef, 2100 }, { 0x3dc, 2200 }, { 0x3c9, 2300 },
-	{ 0x3b6, 2400 }, { 0x3a4, 2500 }, { 0x392, 2600 }, { 0x381, 2700 },
-	{ 0x36f, 2800 }, { 0x35f, 2900 }, { 0x34e, 3000 }, { 0x33d, 3100 },
-	{ 0x32d, 3200 }, { 0x31d, 3300 }, { 0x30d, 3400 }, { 0x2fd, 3500 },
-	{ 0x2ee, 3600 }, { 0x2df, 3700 }, { 0x2d0, 3800 }, { 0x2c2, 3900 },
-	{ 0x2b4, 4000 }, { 0x2a6, 4100 }, { 0x299, 4200 }, { 0x28c, 4300 },
-	{ 0x27f, 4400 }, { 0x272, 4500 }, { 0x265, 4600 }, { 0x259, 4700 },
-	{ 0x24d, 4800 }, { 0x241, 4900 }, { 0x236, 5000 }, { 0x22b, 5100 },
-	{ 0x220, 5200 }, { 0x215, 5300 }, { 0x20a, 5400 }, { 0x200, 5500 },
-	{ 0x1f6, 5600 }, { 0x1ec, 5700 }, { 0x1e2, 5800 }, { 0x1d8, 5900 },
-	{ 0x1cf, 6000 }, { 0x1c6, 6100 }, { 0x1bc, 6200 }, { 0x1b3, 6300 },
-	{ 0x1aa, 6400 }, { 0x1a2, 6500 }, { 0x199, 6600 }, { 0x191, 6700 },
-	{ 0x189, 6800 }, { 0x181, 6900 }, { 0x179, 7000 }, { 0x171, 7100 },
-	{ 0x169, 7200 }, { 0x161, 7300 }, { 0x15a, 7400 }, { 0x153, 7500 },
-	{ 0x14b, 7600 }, { 0x144, 7700 }, { 0x13d, 7800 }, { 0x137, 7900 },
-	{ 0x130, 8000 }, { 0x12a, 8100 }, { 0x124, 8200 }, { 0x11e, 8300 },
-	{ 0x118, 8400 }, { 0x112, 8500 }, { 0x10c, 8600 }, { 0x107, 8700 },
-	{ 0x101, 8800 }, { 0xfc, 8900 }, { 0xf7, 9000 }, { 0xf2, 9100 },
-	{ 0xec, 9200 }, { 0xe7, 9300 }, { 0xe2, 9400 }, { 0xdd, 9500 },
-	{ 0xd8, 9600 }, { 0xd4, 9700 }, { 0xcf, 9800 }, { 0xca, 9900 },
-	{ 0xc6, 10000 }, { 0xc2, 10100 }, { 0xbe, 10200 }, { 0xb9, 10300 },
-	{ 0xb5, 10400 }, { 0xb1, 10500 }, { 0xae, 10600 }, { 0xaa, 10700 },
-	{ 0xa6, 10800 }, { 0xa3, 10900 }, { 0x9f, 11000 }, { 0x9b, 11100 },
-	{ 0x98, 11200 }, { 0x95, 11300 }, { 0x91, 11400 }, { 0x8e, 11500 },
-	{ 0x8b, 11600 }, { 0x88, 11700 }, { 0x85, 11800 }, { 0x82, 11900 },
-	{ 0x7f, 12000 }, { 0x7c, 12100 }, { 0x7a, 12200 }, { 0x77, 12300 },
-	{ 0x74, 12400 }, { 0x72, 12500 }, { 0x6f, 12600 }, { 0x6d, 12700 },
-	{ 0x6b, 12800 }, { 0x68, 12900 }, { 0x66, 13000 }, { 0x64, 13100 },
-	{ 0x61, 13200 }, { 0x5f, 13300 }, { 0x5d, 13400 }, { 0x5b, 13500 },
-	{ 0x59, 13600 }, { 0x57, 13700 }, { 0x55, 13800 }, { 0x53, 13900 },
-	{ 0x51, 14000 }, { 0x4f, 14100 }, { 0x4e, 14200 }, { 0x4c, 14300 },
-	{ 0x4a, 14400 }, { 0x49, 14500 }, { 0x47, 14600 }, { 0x45, 14700 },
-	{ 0x44, 14800 }, { 0x42, 14900 }, { 0x41, 15000 }, { 0x3f, 15100 },
-	{ 0x3e, 15200 }, { 0x3c, 15300 }, { 0x3b, 15400 }, { 0x3a, 15500 },
-	{ 0x38, 15600 }, { 0x37, 15700 }, { 0x36, 15800 }, { 0x34, 15900 },
-	{ 0x33, 16000 }, { 0x32, 16100 }, { 0x31, 16200 }, { 0x30, 16300 },
-	{ 0x2f, 16400 }, { 0x2e, 16500 }, { 0x2d, 16600 }, { 0x2c, 16700 },
-	{ 0x2b, 16800 }, { 0x2a, 16900 }, { 0x29, 17000 }, { 0x28, 17100 },
-	{ 0x27, 17200 }, { 0x26, 17300 }, { 0x25, 17400 }, { 0x24, 17500 },
-	{ 0x23, 17600 }, { 0x22, 17800 }, { 0x21, 17900 }, { 0x20, 18000 },
-	{ 0x1f, 18200 }, { 0x1e, 18300 }, { 0x1d, 18500 }, { 0x1c, 18700 },
-	{ 0x1b, 18900 }, { 0x1a, 19000 }, { 0x19, 19200 }, { 0x18, 19300 },
-	{ 0x17, 19500 }, { 0x16, 19700 }, { 0x15, 19900 }, { 0x14, 20000 }
-};
 
 PxMltDevice::PxMltReceiver::PxMltReceiver(PxMltDevice &parent, std::uintptr_t index)
 	: ReceiverBase(RECEIVER_SAT_SET_STREAM_ID_BEFORE_TUNE | RECEIVER_WAIT_AFTER_LOCK_TC_T),
@@ -1050,32 +1001,32 @@ int PxMltDevice::PxMltReceiver::ReadStat(px4::command::StatType type, std::int32
 				break;
 
 			i_min = 0;
-			i_max = (sizeof(isdbs_cn_table_) / sizeof(isdbs_cn_table_[0])) - 1;
+			i_max = (sizeof(cxd2856er_isdbs_cn_table) / sizeof(cxd2856er_isdbs_cn_table[0])) - 1;
 
-			if (isdbs_cn_table_[i_min].val <= val) {
-				value = isdbs_cn_table_[i_min].cnr;
+			if (cxd2856er_isdbs_cn_table[i_min].val <= val) {
+				value = cxd2856er_isdbs_cn_table[i_min].cnr;
 				break;
 			}
-			if (isdbs_cn_table_[i_max].val >= val) {
-				value = isdbs_cn_table_[i_max].cnr;
+			if (cxd2856er_isdbs_cn_table[i_max].val >= val) {
+				value = cxd2856er_isdbs_cn_table[i_max].cnr;
 				break;
 			}
 
 			while (true) {
 				i = i_min + (i_max - i_min) / 2;
 
-				if (isdbs_cn_table_[i].val == val) {
-					value = isdbs_cn_table_[i].cnr;
+				if (cxd2856er_isdbs_cn_table[i].val == val) {
+					value = cxd2856er_isdbs_cn_table[i].cnr;
 					break;
 				}
 
-				if (isdbs_cn_table_[i].val > val)
+				if (cxd2856er_isdbs_cn_table[i].val > val)
 					i_min = i + 1;
 				else
 					i_max = i - 1;
 
 				if (i_max < i_min) {
-					value = isdbs_cn_table_[i_max].cnr;
+					value = cxd2856er_isdbs_cn_table[i_max].cnr;
 					break;
 				}
 			}

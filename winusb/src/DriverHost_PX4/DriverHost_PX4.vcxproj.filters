@@ -233,6 +233,9 @@
     <ClInclude Include="xit_ts_framer.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="cxd2856er_cn_table.hpp">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\pkg\DriverHost_PX4\DriverHost_PX4.ini">

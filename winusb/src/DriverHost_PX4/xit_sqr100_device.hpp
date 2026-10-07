@@ -32,6 +32,13 @@ public:
 	int WriteCardData(const std::uint8_t *buf, std::uint8_t len) override;
 
 private:
+	struct StreamContext final {
+		/* 終了待機で Receiver を解放する間も、抜去通知と受信コールバックから参照する。 */
+		std::shared_ptr<ReceiverBase::StreamBuffer> stream_buf;
+		/* TS の端数と同期状態は framer に保持し、キャプチャ開始・終了時に初期化する。 */
+		XitTsFramer framer;
+	};
+
 	class Receiver final : public ReceiverBase {
 	public:
 		explicit Receiver(XitSqr100Device &parent);
@@ -46,10 +53,9 @@ private:
 		int SetFrequency() override;
 		int SetStreamId() override;
 	private:
-		int PauseCapture();
 		XitSqr100Device &parent_;
 		std::condition_variable_any close_cond_;
-		bool open_ = false;
+		/* USB 開始に失敗した場合も配信バッファは稼働するため、状態を分ける。 */
 		bool streaming_ = false;
 		bool buffer_started_ = false;
 		SystemType system_ = SystemType::UNSPECIFIED;
@@ -65,15 +71,15 @@ private:
 	unsigned int buffer_packets_ = 2048;
 	int purge_timeout_ = 2000;
 	bool no_raw_io_ = false;
+	/* 受信機は1基で、開閉とカードの共有電源判定を同じロック下の状態で管理する。 */
 	bool receiver_open_ = false;
 	std::unique_ptr<Receiver> receiver_;
-	std::shared_ptr<ReceiverBase::StreamBuffer> stream_buffer_;
-	XitTsFramer framer_;
 	bool available_ = true;
 	bool initialized_ = false;
 	bool terminating_ = false;
 	bool card_open_ = false;
 	it930x_bridge bridge_ = {};
+	StreamContext stream_ctx_;
 };
 
 } // namespace px4
