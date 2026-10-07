@@ -179,11 +179,30 @@ int XitSqr100Device::OpenCard()
 
 	/* カード初期化の失敗は受信機の登録や受信を中止させない。 */
 	ret = it930x_bcas_init(&bridge_, &bcas_config);
-	if (!ret)
-		card_open_ = true;
-	else if (!receiver_open_)
-		SetBackendPower(false);
-	return ret;
+
+	if (ret) {
+		if (!receiver_open_)
+			SetBackendPower(false);
+		return ret;
+	}
+
+	/* XIT-SQR100 は ATR を受信するために、カード初期化後に H7 を出力 Low に設定する。 */
+	ret = it930x_set_gpio_mode(&bridge_, 7, IT930X_GPIO_OUT, true);
+	if (ret) {
+		if (!receiver_open_)
+			SetBackendPower(false);
+		return ret;
+	}
+
+	ret = it930x_write_gpio(&bridge_, 7, false);
+	if (ret) {
+		if (!receiver_open_)
+			SetBackendPower(false);
+		return ret;
+	}
+
+	card_open_ = true;
+	return 0;
 }
 
 void XitSqr100Device::CloseCard()
