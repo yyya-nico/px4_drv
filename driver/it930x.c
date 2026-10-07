@@ -1283,7 +1283,8 @@ int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len)
 		struct it930x_ctrl_buf write_buf;
 		struct it930x_ctrl_buf read_buf;
 
-		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH, &available);
+		ret = it930x_read_reg(it930x, IT930X_REG_UART_RX_LENGTH,
+				      &available);
 		if (ret)
 			return ret;
 		if (!available)
