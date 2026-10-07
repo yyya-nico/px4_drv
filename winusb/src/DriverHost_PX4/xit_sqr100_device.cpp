@@ -194,6 +194,7 @@ int XitSqr100Device::OpenCard()
 
 	/* XIT-SQR100 は ATR を受信するために、GPIO H7 を出力 Low に設定する。 */
 	ret = it930x_write_gpio(&bridge_, 7, false);
+
 	if (ret) {
 		if (!receiver_open_)
 			SetBackendPower(false);
