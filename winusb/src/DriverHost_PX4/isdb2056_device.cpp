@@ -12,7 +12,7 @@
 
 namespace px4 {
 
-/* カード検出とリセットの配線・検出極性は機種側で定義する。 */
+/* カードリーダーの取り扱いフラグ */
 static constexpr bool is_extend = false;
 
 Isdb2056Device::Isdb2056Device(const std::wstring &path, const px4::DeviceDefinition &device_def, std::uintptr_t index, px4::ReceiverManager &receiver_manager)

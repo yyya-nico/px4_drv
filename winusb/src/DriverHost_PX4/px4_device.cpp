@@ -14,7 +14,7 @@
 
 namespace px4 {
 
-/* カード検出とリセットの配線・検出極性は機種側で定義する。 */
+/* カードリーダーの取り扱いフラグ */
 static constexpr bool is_extend = false;
 
 struct Px4MultiDeviceModeParam final {

@@ -11,7 +11,7 @@
 
 namespace px4 {
 
-/* カード検出とリセットの配線・検出極性は機種側で定義する。 */
+/* カードリーダーの取り扱いフラグ */
 static constexpr bool is_extend = true;
 
 XitSqr100Device::XitSqr100Device(const std::wstring &path, const DeviceDefinition &definition, std::uintptr_t index, ReceiverManager &receiver_manager)
