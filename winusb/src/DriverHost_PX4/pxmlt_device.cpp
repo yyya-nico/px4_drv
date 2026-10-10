@@ -14,7 +14,7 @@
 namespace px4 {
 
 /* カード検出とリセットの配線・検出極性は機種側で定義する。 */
-static const it930x_bcas_config bcas_config = { 6, 14, false };
+static constexpr bool is_extend = false;
 
 const PxMltDevice::PxMltDeviceParam PxMltDevice::params_[][5] = {
 	/* PX-MLT5U */
@@ -321,7 +321,7 @@ int PxMltDevice::OpenCard()
 			return ret;
 	}
 
-	int ret = it930x_bcas_init(&it930x_, &bcas_config);
+	int ret = it930x_bcas_init(&it930x_, is_extend);
 	if (ret) {
 		if (!open_count_)
 			SetBackendPower(false);
@@ -348,13 +348,13 @@ int PxMltDevice::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 	return card_open_ && available_ && HasCardReader() ?
-		it930x_bcas_detect_card(&it930x_, &bcas_config, &detected) : -ENODEV;
+		it930x_bcas_detect_card(&it930x_, is_extend, &detected) : -ENODEV;
 }
 
 int PxMltDevice::ResetCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ ? it930x_bcas_reset_card(&it930x_, &bcas_config) : -ENODEV;
+	return card_open_ ? it930x_bcas_reset_card(&it930x_, is_extend) : -ENODEV;
 }
 
 int PxMltDevice::SetCardBaudrate(::it930x_uart_baudrate baudrate)

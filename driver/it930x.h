@@ -104,22 +104,17 @@ int it930x_write_gpio(struct it930x_bridge *it930x, int gpio, bool high);
 int it930x_set_pid_filter(struct it930x_bridge *it930x, int input_idx,
 			  struct it930x_pid_filter *filter);
 int it930x_purge_psb(struct it930x_bridge *it930x, int timeout);
-/* GPIO 配線と検出極性は機種別実装が所有し、各カード操作へ渡す。 */
-struct it930x_bcas_config {
-	int detect_gpio;
-	int reset_gpio;
-	bool detect_active_high;
-};
+/* XIT-SQR100 だけが拡張配線を使い、GPIO と検出極性を切り替える。 */
 int it930x_bcas_init(struct it930x_bridge *it930x,
-		     const struct it930x_bcas_config *config);
+		     bool is_extend);
 int it930x_bcas_reset_card(struct it930x_bridge *it930x,
-			   const struct it930x_bcas_config *config);
+			   bool is_extend);
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready);
 int it930x_bcas_get_data(struct it930x_bridge *it930x, u8 *buf, u8 *len);
 int it930x_bcas_send_data(struct it930x_bridge *it930x, const u8 *buf, u8 len);
 /* 検出 GPIO の入力設定を済ませた init の成功後に呼ぶ。 */
 int it930x_bcas_detect_card(struct it930x_bridge *it930x,
-			  const struct it930x_bcas_config *config,
+			  bool is_extend,
 			  bool *detected);
 int it930x_bcas_set_baudrate(struct it930x_bridge *it930x,
 			     enum it930x_uart_baudrate baudrate);

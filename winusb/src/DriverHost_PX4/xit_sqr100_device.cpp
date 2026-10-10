@@ -12,7 +12,7 @@
 namespace px4 {
 
 /* カード検出とリセットの配線・検出極性は機種側で定義する。 */
-static const it930x_bcas_config bcas_config = { 15, 1, true };
+static constexpr bool is_extend = true;
 
 XitSqr100Device::XitSqr100Device(const std::wstring &path, const DeviceDefinition &definition, std::uintptr_t index, ReceiverManager &receiver_manager)
 	: DeviceBase(path, definition, index, receiver_manager)
@@ -184,7 +184,7 @@ int XitSqr100Device::OpenCard()
 	}
 
 	/* カード初期化の失敗は受信機の登録や受信を中止させない。 */
-	ret = it930x_bcas_init(&bridge_, &bcas_config);
+	ret = it930x_bcas_init(&bridge_, is_extend);
 
 	if (ret) {
 		if (!receiver_open_)
@@ -221,14 +221,14 @@ int XitSqr100Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 	return card_open_ && available_ && initialized_ && !terminating_ ?
-		it930x_bcas_detect_card(&bridge_, &bcas_config, &detected) : -ENODEV;
+		it930x_bcas_detect_card(&bridge_, is_extend, &detected) : -ENODEV;
 }
 
 int XitSqr100Device::ResetCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 	return card_open_ && available_ && initialized_ ?
-		it930x_bcas_reset_card(&bridge_, &bcas_config) : -ENODEV;
+		it930x_bcas_reset_card(&bridge_, is_extend) : -ENODEV;
 }
 
 int XitSqr100Device::SetCardBaudrate(::it930x_uart_baudrate baudrate)

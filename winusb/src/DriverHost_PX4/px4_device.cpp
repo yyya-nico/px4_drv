@@ -15,7 +15,7 @@
 namespace px4 {
 
 /* カード検出とリセットの配線・検出極性は機種側で定義する。 */
-static const it930x_bcas_config bcas_config = { 6, 14, false };
+static constexpr bool is_extend = false;
 
 struct Px4MultiDeviceModeParam final {
 	Px4MultiDeviceMode mode;
@@ -389,7 +389,7 @@ int Px4Device::OpenCard()
 	if (ret)
 		return ret;
 
-	ret = it930x_bcas_init(&it930x_, &bcas_config);
+	ret = it930x_bcas_init(&it930x_, is_extend);
 	if (ret) {
 		if (mldev_)
 			mldev_->SetCardPower(*this, false);
@@ -420,13 +420,13 @@ int Px4Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 	return card_open_ && available_ && HasCardReader() ?
-		it930x_bcas_detect_card(&it930x_, &bcas_config, &detected) : -ENODEV;
+		it930x_bcas_detect_card(&it930x_, is_extend, &detected) : -ENODEV;
 }
 
 int Px4Device::ResetCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ ? it930x_bcas_reset_card(&it930x_, &bcas_config) : -ENODEV;
+	return card_open_ ? it930x_bcas_reset_card(&it930x_, is_extend) : -ENODEV;
 }
 
 int Px4Device::SetCardBaudrate(::it930x_uart_baudrate baudrate)

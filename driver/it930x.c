@@ -1192,23 +1192,13 @@ static int it930x_set_uart_baudrate(struct it930x_bridge *it930x,
 				&write_buf, NULL, NULL, false);
 }
 
-static bool it930x_bcas_config_valid(const struct it930x_bcas_config *config)
-{
-	return config && config->detect_gpio >= 1 && config->detect_gpio <= 16 &&
-		config->reset_gpio >= 1 && config->reset_gpio <= 16 &&
-		config->detect_gpio != config->reset_gpio;
-}
-
 int it930x_bcas_init(struct it930x_bridge *it930x,
-		     const struct it930x_bcas_config *config)
+		     bool is_extend)
 {
 	u8 mode = 1;
 	struct it930x_ctrl_buf write_buf;
+	int detect_gpio;
 	int ret;
-
-	/* 不正な配線設定では UART を含むハードウェア操作へ進まない。 */
-	if (!it930x_bcas_config_valid(config))
-		return -EINVAL;
 
 	write_buf.buf = &mode;
 	write_buf.len = 1;
@@ -1219,25 +1209,25 @@ int it930x_bcas_init(struct it930x_bridge *it930x,
 
 	/* カード検出は頻繁に呼ばれるため GPIO H6 の入力設定は初期化時に済ませる */
 	/* XIT-SQR100 では GPIO H15 を入力設定 */
-	ret = it930x_set_gpio_mode(it930x, config->detect_gpio, IT930X_GPIO_IN, true);
+	detect_gpio = is_extend ? 15 : 6;
+	ret = it930x_set_gpio_mode(it930x, detect_gpio, IT930X_GPIO_IN, true);
 	return ret;
 }
 
 int it930x_bcas_reset_card(struct it930x_bridge *it930x,
-			   const struct it930x_bcas_config *config)
+			   bool is_extend)
 {
+	int reset_gpio;
 	int ret;
-
-	if (!it930x_bcas_config_valid(config))
-		return -EINVAL;
 
 	/* B-CAS のリセット線は GPIO H14 に接続されている */
 	/* XIT-SQR100 では GPIO H1 に接続 */
-	ret = it930x_set_gpio_mode(it930x, config->reset_gpio, IT930X_GPIO_OUT, true);
+	reset_gpio = is_extend ? 1 : 14;
+	ret = it930x_set_gpio_mode(it930x, reset_gpio, IT930X_GPIO_OUT, true);
 	if (ret)
 		return ret;
 
-	ret = it930x_write_gpio(it930x, config->reset_gpio, false);
+	ret = it930x_write_gpio(it930x, reset_gpio, false);
 	if (ret)
 		return ret;
 
@@ -1251,7 +1241,7 @@ int it930x_bcas_reset_card(struct it930x_bridge *it930x,
 		return ret;
 
 	msleep(5);
-	return it930x_write_gpio(it930x, config->reset_gpio, true);
+	return it930x_write_gpio(it930x, reset_gpio, true);
 }
 
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
@@ -1352,22 +1342,24 @@ int it930x_bcas_send_data(struct it930x_bridge *it930x, const u8 *buf, u8 len)
 }
 
 int it930x_bcas_detect_card(struct it930x_bridge *it930x,
-			  const struct it930x_bcas_config *config,
+			  bool is_extend,
 			  bool *detected)
 {
 	bool high;
+	int detect_gpio;
 	int ret;
 
-	if (!detected || !it930x_bcas_config_valid(config))
+	if (!detected)
 		return -EINVAL;
 
 	/* カード検出スイッチは GPIO H6 の Low Active 入力 */
 	/* XIT-SQR100 では GPIO H15 の High Active 入力 */
-	ret = it930x_read_gpio(it930x, config->detect_gpio, &high);
+	detect_gpio = is_extend ? 15 : 6;
+	ret = it930x_read_gpio(it930x, detect_gpio, &high);
 	if (ret)
 		return ret;
 
-	*detected = high == config->detect_active_high;
+	*detected = high == is_extend;
 	return 0;
 }
 

@@ -88,36 +88,24 @@ static int mock_rx(struct itedtv_bus *bus, void *buf, int *len)
 int main(void)
 {
 	struct it930x_bridge bridge = {0};
-	const struct it930x_bcas_config normal = {6, 14, false};
-	const struct it930x_bcas_config xit = {15, 1, true};
-	struct it930x_bcas_config invalid = {0, 14, false};
 	u8 data[255], len;
 	bool ready = false, detected = false;
 	bridge.bus.ops.ctrl_tx = mock_tx;
 	bridge.bus.ops.ctrl_rx = mock_rx;
 	assert(it930x_init(&bridge) == 0);
-	/* 不正な設定では UART や GPIO を操作しない。 */
-	assert(it930x_bcas_init(&bridge, NULL) == -EINVAL);
-	assert(it930x_bcas_init(&bridge, &invalid) == -EINVAL);
-	invalid.detect_gpio = 17;
-	assert(it930x_bcas_detect_card(&bridge, &invalid, &detected) == -EINVAL);
-	invalid.detect_gpio = 6; invalid.reset_gpio = 6;
-	assert(it930x_bcas_reset_card(&bridge, &invalid) == -EINVAL);
-	invalid.reset_gpio = 17;
-	assert(it930x_bcas_reset_card(&bridge, &invalid) == -EINVAL);
-	assert(mode_count == 0 && writes[0x7904] == 0);
+	assert(it930x_bcas_detect_card(&bridge, false, NULL) == -EINVAL);
 	/* 初期化失敗をそのまま上位へ返す。 */
 	fail_command = IT930X_CMD_UART_SET_MODE;
-	assert(it930x_bcas_init(&bridge, &xit) == -EIO);
+	assert(it930x_bcas_init(&bridge, true) == -EIO);
 	fail_command = -1;
-	assert(it930x_bcas_init(&bridge, &xit) == 0);
+	assert(it930x_bcas_init(&bridge, true) == 0);
 	assert(mode_count == 1 && modes[0] == 1);
 	assert(regs[0xd8e8] == 0 && regs[0xd8e9] == 1);
 	regs[0xd8e6] = 1;
-	assert(it930x_bcas_detect_card(&bridge, &xit, &detected) == 0 && detected);
+	assert(it930x_bcas_detect_card(&bridge, true, &detected) == 0 && detected);
 	regs[0xd8e6] = 0;
-	assert(it930x_bcas_detect_card(&bridge, &xit, &detected) == 0 && !detected);
-	assert(it930x_bcas_reset_card(&bridge, &xit) == 0);
+	assert(it930x_bcas_detect_card(&bridge, true, &detected) == 0 && !detected);
+	assert(it930x_bcas_reset_card(&bridge, true) == 0);
 	assert(writes[0xd8af] == 2 && regs[0xd8af] == 1);
 	assert(writes[0xd8e3] == 0 && writes[0x7904] == 1 && regs[0x7904] == 2);
 	/* 1バイト受信長の上限と caller の容量を扱い、境界内で読み出す。 */
@@ -136,7 +124,7 @@ int main(void)
 	assert(it930x_bcas_send_data(&bridge, data, 49) == 0);
 	assert(writes[0x4953] == 0 && writes[IT930X_REG_UART_REALSEND] == 1);
 	/* XIT-SQR100 の配線設定でも共通 UART の受信長と ready を別に扱う。 */
-	assert(it930x_bcas_init(&bridge, &xit) == 0);
+	assert(it930x_bcas_init(&bridge, true) == 0);
 	available = 13;
 	regs[IT930X_REG_UART_RX_READY] = 0;
 	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && !ready);
@@ -144,12 +132,12 @@ int main(void)
 	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && ready);
 	len = sizeof(data);
 	assert(it930x_bcas_get_data(&bridge, data, &len) == 0 && len == 13);
-	assert(it930x_bcas_reset_card(&bridge, &xit) == 0);
+	assert(it930x_bcas_reset_card(&bridge, true) == 0);
 	assert(writes[0x7904] == 2 && regs[0x7904] == 2);
 	assert(writes[0xd8e3] == 0 && regs[0xd8af] == 1);
 	/* UART 初期化失敗後はカードを起動せず、Low のまま失敗を上位へ返す。 */
 	fail_register = 0x7904;
-	assert(it930x_bcas_reset_card(&bridge, &xit) == -EIO);
+	assert(it930x_bcas_reset_card(&bridge, true) == -EIO);
 	assert(regs[0xd8af] == 0 && writes[0x7904] == 2);
 	fail_register = -1;
 	fail_command = IT930X_CMD_REG_READ;
@@ -158,27 +146,27 @@ int main(void)
 	assert(it930x_bcas_get_data(&bridge, data, &len) == -EIO);
 	fail_command = -1;
 	/* 通常機種は H6 / H14 と既存 UART レジスタを使う。 */
-	assert(it930x_bcas_init(&bridge, &normal) == 0);
+	assert(it930x_bcas_init(&bridge, false) == 0);
 	regs[0xd8c6] = 0;
-	assert(it930x_bcas_detect_card(&bridge, &normal, &detected) == 0 && detected);
-	assert(it930x_bcas_reset_card(&bridge, &normal) == 0);
+	assert(it930x_bcas_detect_card(&bridge, false, &detected) == 0 && detected);
+	assert(it930x_bcas_reset_card(&bridge, false) == 0);
 	assert(writes[0xd8e3] == 2 && writes[0x7904] == 3);
 	regs[IT930X_REG_UART_RX_READY] = 1;
 	assert(it930x_bcas_check_ready(&bridge, &ready) == 0 && ready);
 	assert(it930x_bcas_send_data(&bridge, data, 1) == 0 && writes[0x4953] == 0);
 	regs[0xd8c6] = 1;
-	assert(it930x_bcas_detect_card(&bridge, &normal, &detected) == 0 && !detected);
+	assert(it930x_bcas_detect_card(&bridge, false, &detected) == 0 && !detected);
 	/* GPIO 初期化失敗と読み出し失敗を成功扱いにしない。 */
 	/* 入力設定済みの GPIO はキャッシュで省略されるため、新しい bridge で試す。 */
 	it930x_term(&bridge);
 	assert(it930x_init(&bridge) == 0);
 	fail_register = 0xd8e8;
-	assert(it930x_bcas_init(&bridge, &xit) == -EIO);
+	assert(it930x_bcas_init(&bridge, true) == -EIO);
 	fail_register = -1;
-	assert(it930x_bcas_init(&bridge, &normal) == 0);
+	assert(it930x_bcas_init(&bridge, false) == 0);
 	fail_command = IT930X_CMD_REG_READ;
 	detected = true;
-	assert(it930x_bcas_detect_card(&bridge, &normal, &detected) == -EIO && detected);
+	assert(it930x_bcas_detect_card(&bridge, false, &detected) == -EIO && detected);
 	fail_command = -1;
 	it930x_term(&bridge);
 	puts("IT930x card transport test: passed");
