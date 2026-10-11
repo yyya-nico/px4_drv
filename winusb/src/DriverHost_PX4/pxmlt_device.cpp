@@ -347,7 +347,7 @@ void PxMltDevice::CloseCard()
 int PxMltDevice::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ && available_ && HasCardReader() ?
+	return available_ && HasCardReader() ?
 		it930x_bcas_detect_card(&it930x_, is_extend, &detected) : -ENODEV;
 }
 

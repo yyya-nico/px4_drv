@@ -220,7 +220,7 @@ void XitSqr100Device::CloseCard()
 int XitSqr100Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ && available_ && initialized_ && !terminating_ ?
+	return available_ && initialized_ && !terminating_ ?
 		it930x_bcas_detect_card(&bridge_, is_extend, &detected) : -ENODEV;
 }
 

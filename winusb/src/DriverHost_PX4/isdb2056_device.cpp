@@ -310,7 +310,7 @@ void Isdb2056Device::CloseCard()
 int Isdb2056Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ && available_ ? it930x_bcas_detect_card(&it930x_, is_extend, &detected) : -ENODEV;
+	return available_ ? it930x_bcas_detect_card(&it930x_, is_extend, &detected) : -ENODEV;
 }
 
 int Isdb2056Device::ResetCard()
