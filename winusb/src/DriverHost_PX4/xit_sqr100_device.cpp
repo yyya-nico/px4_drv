@@ -38,7 +38,7 @@ int XitSqr100Device::Init()
 	if (!available_)
 		return -ENODEV;
 
-	if (initialized_)
+	if (init_)
 		return -EALREADY;
 
 	bridge_.dev = &dev_;
@@ -106,7 +106,7 @@ int XitSqr100Device::Init()
 
 	receiver_.reset(new Receiver(*this));
 	stream_ctx_.stream_buf = receiver_->GetStreamBuffer();
-	initialized_ = true;
+	init_ = true;
 
 	const auto &definition = device_def_.receivers.front();
 	command::ReceiverInfo info = {};
@@ -125,36 +125,31 @@ void XitSqr100Device::Term()
 {
 	std::unique_lock<std::recursive_mutex> lock(lock_);
 
-	if (!initialized_)
+	if (!init_)
 		return;
-	terminating_ = true;
-	CloseCard();
 
-	/* manager は Open 時に manager -> device の順で取得するため、先に device を解く。 */
-	lock.unlock();
 	receiver_manager_.Unregister(receiver_.get());
 
-	/* 受信機の利用者が閉じるまでの待機中はデバイスロックを保持しない。 */
-	receiver_.reset();
-	lock.lock();
+	lock.unlock();
+
 	stream_ctx_.stream_buf.reset();
-	SetBackendPower(false);
-	available_ = false;
-	initialized_ = false;
+	receiver_.reset();
+
+	lock.lock();
+
 	it930x_term(&bridge_);
 	itedtv_bus_term(&bridge_.bus);
+
+	init_ = false;
+	return;
 }
 
 void XitSqr100Device::SetAvailability(bool available)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 
-	if (!available) {
+	if (!available)
 		card_open_ = false;
-		if (stream_ctx_.stream_buf)
-			stream_ctx_.stream_buf->StopRequest();
-	}
-
 	available_ = available;
 }
 
@@ -170,7 +165,7 @@ int XitSqr100Device::OpenCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 
-	if (!available_ || !initialized_ || terminating_)
+	if (!available_)
 		return -ENODEV;
 	if (card_open_)
 		return -EBUSY;
@@ -220,43 +215,37 @@ void XitSqr100Device::CloseCard()
 int XitSqr100Device::DetectCard(bool &detected)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ && initialized_ && !terminating_ ?
-		it930x_bcas_detect_card(&bridge_, is_extend, &detected) : -ENODEV;
+	return available_ ? it930x_bcas_detect_card(&bridge_, is_extend, &detected) : -ENODEV;
 }
 
 int XitSqr100Device::ResetCard()
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return card_open_ && available_ && initialized_ ?
-		it930x_bcas_reset_card(&bridge_, is_extend) : -ENODEV;
+	return card_open_ ? it930x_bcas_reset_card(&bridge_, is_extend) : -ENODEV;
 }
 
 int XitSqr100Device::SetCardBaudrate(::it930x_uart_baudrate baudrate)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ && initialized_ && card_open_ ?
-		it930x_bcas_set_baudrate(&bridge_, baudrate) : -ENODEV;
+	return card_open_ ? it930x_bcas_set_baudrate(&bridge_, baudrate) : -ENODEV;
 }
 
 int XitSqr100Device::IsCardDataReady(bool &ready)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ && initialized_ && card_open_ ?
-		it930x_bcas_check_ready(&bridge_, &ready) : -ENODEV;
+	return card_open_ ? it930x_bcas_check_ready(&bridge_, &ready) : -ENODEV;
 }
 
 int XitSqr100Device::ReadCardData(std::uint8_t *buf, std::uint8_t &len)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ && initialized_ && card_open_ ?
-		it930x_bcas_get_data(&bridge_, buf, &len) : -ENODEV;
+	return card_open_ ? it930x_bcas_get_data(&bridge_, buf, &len) : -ENODEV;
 }
 
 int XitSqr100Device::WriteCardData(const std::uint8_t *buf, std::uint8_t len)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
-	return available_ && initialized_ && card_open_ ?
-		it930x_bcas_send_data(&bridge_, buf, len) : -ENODEV;
+	return card_open_ ? it930x_bcas_send_data(&bridge_, buf, len) : -ENODEV;
 }
 
 void XitSqr100Device::LoadConfig()
@@ -432,7 +421,7 @@ int XitSqr100Device::Receiver::Open()
 {
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 
-	if (!parent_.available_ || !parent_.initialized_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.init_)
 		return -ENODEV;
 
 	if (parent_.receiver_open_)
@@ -513,7 +502,7 @@ int XitSqr100Device::Receiver::SetFrequency()
 {
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.receiver_open_)
 		return -ENODEV;
 
 	int ret;
@@ -546,7 +535,7 @@ int XitSqr100Device::Receiver::SetStreamId()
 {
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.receiver_open_)
 		return -ENODEV;
 
 	if (params_.system != SystemType::ISDB_S || params_.stream_id > UINT16_MAX)
@@ -561,7 +550,7 @@ int XitSqr100Device::Receiver::CheckLock(bool &locked)
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 
 	locked = false;
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.receiver_open_)
 		return -ENODEV;
 
 	int ret;
@@ -582,13 +571,7 @@ int XitSqr100Device::Receiver::CheckLock(bool &locked)
 
 int XitSqr100Device::Receiver::SetLnbVoltage(std::int32_t voltage)
 {
-	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
-
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
-		return -ENODEV;
-
-	/* XIT-SQR100 はアンテナ給電を備えていない。給電要求は明示的に失敗させる。 */
-	return voltage == 0 ? 0 : -ENOSYS;
+	return 0;
 }
 
 int XitSqr100Device::Receiver::SetCapture(bool capture)
@@ -604,7 +587,7 @@ int XitSqr100Device::Receiver::SetCapture(bool capture)
 		return ret;
 	}
 
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.receiver_open_)
 		return -ENODEV;
 
 	if (streaming_)
@@ -645,7 +628,7 @@ int XitSqr100Device::Receiver::ReadStat(command::StatType type, std::int32_t &va
 {
 	std::lock_guard<std::recursive_mutex> lock(parent_.lock_);
 
-	if (!parent_.available_ || !parent_.receiver_open_ || parent_.terminating_)
+	if (!parent_.available_ || !parent_.receiver_open_)
 		return -ENODEV;
 
 	value = 0;

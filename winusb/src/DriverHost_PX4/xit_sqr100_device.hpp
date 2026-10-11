@@ -78,9 +78,8 @@ private:
 	/* 受信機は1基で、開閉とカードの共有電源判定を同じロック下の状態で管理する。 */
 	bool receiver_open_ = false;
 	std::unique_ptr<Receiver> receiver_;
-	bool available_ = true;
-	bool initialized_ = false;
-	bool terminating_ = false;
+	std::atomic_bool available_ = true;
+	std::atomic_bool init_ = false;
 	bool card_open_ = false;
 	it930x_bridge bridge_ = {};
 	StreamContext stream_ctx_;
