@@ -37,6 +37,8 @@ protected:
 
 	bool IsConnected() const noexcept { return (handle_ && handle_ != INVALID_HANDLE_VALUE); }
 	void SetHandle(HANDLE handle) noexcept { handle_ = handle; }
+	void CancelPendingIo(OVERLAPPED &ol) noexcept;
+	static void CancelPendingIo(HANDLE handle, OVERLAPPED &ol) noexcept;
 
 	std::error_condition error_;
 	HANDLE handle_;
