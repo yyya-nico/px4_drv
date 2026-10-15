@@ -217,6 +217,11 @@ static RESPONSECODE px4_ifd_read_response(struct reader_context *ctx,
 
 	while (1) {
 		memset(&rx_data, 0, sizeof(rx_data));
+		if (total_len >= rx_capacity)
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		/* px4_card_data.length is u8, so request up to 255 bytes per read */
+		rx_data.length = (unsigned char)(((rx_capacity - total_len) < 255u) ?
+					       (rx_capacity - total_len) : 255u);
 		ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
 		if (ret < 0) {
 			if (errno == EAGAIN) {
@@ -444,6 +449,11 @@ static RESPONSECODE px4_ifd_recv_t1_frame(struct reader_context *ctx,
 
 	while (1) {
 		memset(&rx_data, 0, sizeof(rx_data));
+		if (total >= rx_capacity)
+			return IFD_ERROR_INSUFFICIENT_BUFFER;
+		/* px4_card_data.length is u8, so request up to 255 bytes per read */
+		rx_data.length = (unsigned char)(((rx_capacity - total) < 255u) ?
+					       (rx_capacity - total) : 255u);
 		ret = ioctl(ctx->fd, PX4CARD_READ, &rx_data);
 		if (ret < 0) {
 			if (errno == EAGAIN) {
