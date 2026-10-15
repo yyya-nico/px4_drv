@@ -10,7 +10,6 @@ OBJS = $(SRCS:.c=.o)
 
 INSTALL_DIR = /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux
 PLIST_DIR   = /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents
-OLD_INSTALL_DIR = /usr/lib/pcsc/drivers/ifd-px4
 
 all: $(TARGET)
 
@@ -21,9 +20,6 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $<
 
 install: $(TARGET)
-	@if [ -e $(OLD_INSTALL_DIR) ]; then \
-		rm -rf $(OLD_INSTALL_DIR); \
-	fi
 	install -d $(INSTALL_DIR)
 	install -m 0755 $(TARGET) $(INSTALL_DIR)/
 	install -m 0644 Info.plist $(PLIST_DIR)/
