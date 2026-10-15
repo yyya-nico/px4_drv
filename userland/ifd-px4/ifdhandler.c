@@ -718,6 +718,7 @@ static const struct px4_vid_pid_entry px4_vid_pid_table[] = {
 	/* PX-MLT5 series (--> pxmlt5card) */
 	{ 0x0511, 0x084e, "pxmlt5card"   }, /* PX-MLT5U    */
 	{ 0x0511, 0x024e, "pxmlt5card"   }, /* PX-MLT5PE   */
+	{ 0x0511, 0x924e, "pxmlt5card"   }, /* DTV02A-5TS-P */
 	/* PX-MLT8 series (--> pxmlt8card) */
 	{ 0x0511, 0x0253, "pxmlt8card"   }, /* PX-MLT8PE  */
 	/* DTV02A-1T1S-U/N (--> isdb2056card) */
