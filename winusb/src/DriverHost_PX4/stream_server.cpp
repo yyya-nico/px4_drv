@@ -47,6 +47,10 @@ void StreamServer::StreamConnection::Worker() noexcept
 		if (!conn_->Read(buf.get(), size, read, quit_event_))
 			break;
 
+		/* 短い受信のままコマンド構造体として読むと未初期化領域を解釈するため、先に長さを確かめる */
+		if (read < sizeof(px4::command::DataCmd))
+			break;
+
 		int ret = true;
 		px4::command::DataCmd *cmd = reinterpret_cast<px4::command::DataCmd *>(buf.get());
 
@@ -74,7 +78,10 @@ void StreamServer::StreamConnection::Worker() noexcept
 			if (!receiver)
 				break;
 
-			receiver->GetStreamBuffer()->Purge();
+			/* 初期化を諦めた場合は前チャンネルの TS が残るため、記録に残す */
+			if (!receiver->GetStreamBuffer()->Purge())
+				msg_err("px4::StreamServer::StreamConnection::Worker: Purge() failed.\n");
+
 			break;
 
 		default:

@@ -14,6 +14,7 @@
 
 #include "px4_device_params.h"
 #include "firmware.h"
+#include "ts_sync.h"
 
 #define PXMLT_DEVICE_TS_SYNC_COUNT	4
 #define PXMLT_DEVICE_TS_SYNC_SIZE	(188 * PXMLT_DEVICE_TS_SYNC_COUNT)
@@ -156,7 +157,7 @@ static void pxmlt_device_stream_process(struct ptx_chrdev **chrdev,
 
 		for (i = 0; i < PXMLT_DEVICE_TS_SYNC_COUNT; i++) {
 			if (likely(((i + 1) * 188) <= remain)) {
-				if (unlikely((p[i * 188] & 0x8f) != 0x07))
+				if (unlikely(!px4_ts_has_tagged_sync(p[i * 188])))
 					break;
 			} else {
 				sync_remain = true;
@@ -1055,7 +1056,13 @@ int pxmlt_device_init(struct pxmlt_device *pxmlt, struct device *dev,
 
 	for (i = 0; i < pxmlt->chrdevm_num; i++) {
 		chrdev_config[i].ops = &pxmlt_chrdev_ops;
-		chrdev_config[i].options = PTX_CHRDEV_SAT_SET_STREAM_ID_BEFORE_TUNE;
+		/*
+		 * CXD2856ER のロック判定はレジスタを1回読むだけで整定を待たないため、
+		 * 復調が安定する前の TS がそのまま流れて選局直後に同期エラーが出る
+		 * 他機種と同じくロック後の待機を入れ、地上波の TS を配信する前に整定させる
+		 */
+		chrdev_config[i].options = PTX_CHRDEV_SAT_SET_STREAM_ID_BEFORE_TUNE |
+					   PTX_CHRDEV_WAIT_AFTER_LOCK_TC_T;
 		chrdev_config[i].ringbuf_size = 188 * px4_device_params.tsdev_max_packets;
 		chrdev_config[i].ringbuf_threshold_size = chrdev_config[i].ringbuf_size / 10;
 		chrdev_config[i].priv = &pxmlt->chrdevm[i];

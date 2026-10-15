@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/usb.h>
+#include <linux/version.h>
 
 #include "px4_usb_params.h"
 #include "px4_device_params.h"
@@ -161,7 +162,9 @@ static int px4_usb_probe(struct usb_interface *intf,
 		case USB_PID_PX_MLT5U:
 			pxmlt5_model = PXMLT5U_MODEL;
 			fallthrough;
+		/* DTV02A-5TS-P は PX-MLT5PE のリブランド品で、PID の差異以外は同一デバイス */
 		case USB_PID_PX_MLT5PE:
+		case USB_PID_EBETTER_DTV02A_5TS_P:
 			ret = px4_usb_init_bridge(dev, usb_dev,
 						  &ctx->ctx.pxmlt.it930x);
 			if (ret)
@@ -371,6 +374,7 @@ static const struct usb_device_id px4_usb_ids[] = {
 	{ USB_DEVICE(0x0511, USB_PID_PX_Q3PE5) },
 	{ USB_DEVICE(0x0511, USB_PID_PX_MLT5U) },
 	{ USB_DEVICE(0x0511, USB_PID_PX_MLT5PE) },
+	{ USB_DEVICE(0x0511, USB_PID_EBETTER_DTV02A_5TS_P) },
 	{ USB_DEVICE(0x0511, USB_PID_PX_MLT8PE3) },
 	{ USB_DEVICE(0x0511, USB_PID_PX_MLT8PE5) },
 	{ USB_DEVICE(0x0511, USB_PID_DIGIBEST_ISDB2056) },
@@ -393,7 +397,11 @@ static struct usb_driver px4_usb_driver = {
 	.id_table = px4_usb_ids
 };
 
-int px4_usb_register()
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+	int px4_usb_register(void)
+#else
+	int px4_usb_register()
+#endif
 {
 	int ret = 0;
 
@@ -573,7 +581,11 @@ fail:
 	return ret;
 }
 
-void px4_usb_unregister()
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+	void px4_usb_unregister(void)
+#else
+	void px4_usb_unregister()
+#endif
 {
 	usb_deregister(&px4_usb_driver);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);

@@ -2,12 +2,15 @@
 
 #include "px4_device.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 
 #include "type.hpp"
 #include "command.hpp"
 #include "misc_win.h"
+#include "ts_sync.h"
 
 namespace px4 {
 
@@ -25,10 +28,12 @@ Px4Device::Px4Device(const std::wstring &path, const px4::DeviceDefinition &devi
 	: DeviceBase(path, device_def, index, receiver_manager),
 	config_(),
 	lock_(),
+	backend_power_lock_(),
 	available_(true),
 	serial_(),
 	init_(false),
 	open_count_(0),
+	card_open_(false),
 	lnb_power_count_(0),
 	streaming_count_(0)
 {
@@ -97,17 +102,26 @@ void Px4Device::LoadConfig()
 
 void Px4Device::ParseSerialNumber() noexcept
 {
-	if (!usb_dev_.serial)
+	if (usb_serial_number_.empty())
 		return;
 
 	try {
-		serial_.serial_number = std::stoull(usb_dev_.serial->bString);
+		// PX4 系のシリアル番号は末尾1桁を同一筐体内のデバイス番号として使う
+		if (!std::all_of(usb_serial_number_.cbegin(), usb_serial_number_.cend(), [](wchar_t character) {
+			return (character >= L'0') && (character <= L'9');
+		}))
+			throw std::invalid_argument("USB serial number contains a non-digit character.");
+
+		serial_.serial_number = std::stoull(usb_serial_number_);
 		serial_.dev_id = static_cast<std::uint8_t>(serial_.serial_number % 10);
 		serial_.serial_number /= 10;
 
 		dev_dbg(&dev_, "px4::Px4Device::ParseSerialNumber: serial_number: %014llu\n", serial_.serial_number);
 		dev_dbg(&dev_, "px4::Px4Device::ParseSerialNumber: dev_id: %u\n", serial_.dev_id);
-	} catch (...) {}
+	} catch (const std::exception &ex) {
+		serial_ = {};
+		dev_warn(&dev_, "px4::Px4Device::ParseSerialNumber: Invalid USB serial number: %s\n", ex.what());
+	}
 
 	return;
 }
@@ -177,10 +191,6 @@ int Px4Device::Init()
 	if (ret)
 		goto fail_device;
 
-	ret = it930x_bcas_init(&it930x_);
-	if (ret)
-		goto fail_device;
-
 	/* GPIO */
 	ret = it930x_set_gpio_mode(&it930x_, 7, IT930X_GPIO_OUT, true);
 	if (ret)
@@ -201,20 +211,17 @@ int Px4Device::Init()
 		break;
 	}
 
+	/* 共有管理へ登録する前に各デバイスの基板電源を既知の停止状態へ戻す */
+	ret = SetBackendPower(false);
+	if (ret)
+		goto fail_device;
+
 	if (use_mldev) {
 		if (MultiDevice::Search(serial_.serial_number, mldev_))
 			ret = mldev_->Add(*this);
 		else
 			ret = MultiDevice::Alloc(*this, config_.device.multi_device_power_control_mode, mldev_);
 
-		if (ret)
-			goto fail_device;
-	} else {
-		ret = it930x_write_gpio(&it930x_, 7, true);
-		if (ret)
-			goto fail_device;
-
-		ret = it930x_write_gpio(&it930x_, 2, false);
 		if (ret)
 			goto fail_device;
 	}
@@ -264,6 +271,12 @@ int Px4Device::Init()
 	return 0;
 
 fail_device:
+	/* 初期化途中でも共有管理へ登録済みなら外し、同じ機器の再接続で古いポインタを参照させない */
+	if (mldev_) {
+		mldev_->Remove(*this);
+		mldev_.reset();
+	}
+
 	for (int i = 0; i < 4; i++) {
 		stream_ctx_.stream_buf[i] = nullptr;
 		receivers_[i].reset();
@@ -300,6 +313,12 @@ void Px4Device::Term()
 
 	lock.lock();
 
+	/* 受信機とカードが閉じた後に共有管理から外し、静的な機器一覧へ寿命切れのポインタを残さない */
+	if (mldev_) {
+		mldev_->Remove(*this);
+		mldev_.reset();
+	}
+
 	it930x_term(&it930x_);
 	itedtv_bus_term(&it930x_.bus);
 
@@ -309,7 +328,23 @@ void Px4Device::Term()
 
 void Px4Device::SetAvailability(bool available)
 {
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	bool release_card_power = available_ && !available && card_open_;
+	if (release_card_power)
+		card_open_ = false;
 	available_ = available;
+	if (release_card_power && mldev_) {
+		/* 抜去済み USB へ電源制御を送らず、2基連動モデルの共有要求だけを解放する */
+		mldev_->ReleaseCardPower(*this);
+	}
+	if (!available && mldev_) {
+		/*
+		 * カード監視が旧デバイスの寿命を延ばしても、再接続した同じサブデバイスを登録できるよう
+		 * USB 抜去時点で共有管理の生ポインタを破棄する
+		 */
+		mldev_->Remove(*this);
+		mldev_.reset();
+	}
 }
 
 ReceiverBase* Px4Device::GetReceiver(int id) const
@@ -318,6 +353,101 @@ ReceiverBase* Px4Device::GetReceiver(int id) const
 		throw std::out_of_range("receiver id out of range");
 
 	return receivers_[id].get();
+}
+
+bool Px4Device::HasCardReader() const noexcept
+{
+	/* Q3 系は4チューナーずつ2デバイスで構成されるが、物理カードスロットは主デバイス側の1個だけ */
+	switch (usb_dev_.descriptor.idProduct) {
+	case 0x084a:
+	case 0x024a:
+	case 0x074a:
+		return serial_.dev_id == 1;
+	default:
+		return true;
+	}
+}
+
+int Px4Device::OpenCard()
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+
+	if (!available_ || !HasCardReader())
+		return -ENODEV;
+	if (card_open_)
+		return -EBUSY;
+
+	/* 2基連動モデルはカードの電源要求も共有管理へ登録し、片側の受信終了で電源が切れないようにする */
+	int ret = 0;
+	if (mldev_)
+		ret = mldev_->SetCardPower(*this, true);
+	else if (!open_count_)
+		ret = SetBackendPower(true);
+	if (ret)
+		return ret;
+
+	ret = it930x_bcas_init(&it930x_);
+	if (ret) {
+		if (mldev_)
+			mldev_->SetCardPower(*this, false);
+		else if (!open_count_)
+			SetBackendPower(false);
+		return ret;
+	}
+
+	card_open_ = true;
+	return 0;
+}
+
+void Px4Device::CloseCard()
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+
+	if (!card_open_)
+		return;
+
+	card_open_ = false;
+	if (mldev_)
+		mldev_->SetCardPower(*this, false);
+	else if (!open_count_)
+		SetBackendPower(false);
+}
+
+int Px4Device::DetectCard(bool &detected)
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return available_ && HasCardReader() ?
+		it930x_bcas_detect_card(&it930x_, &detected) : -ENODEV;
+}
+
+int Px4Device::ResetCard()
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return card_open_ ? it930x_bcas_reset_card(&it930x_) : -ENODEV;
+}
+
+int Px4Device::SetCardBaudrate(::it930x_uart_baudrate baudrate)
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return card_open_ ? it930x_bcas_set_baudrate(&it930x_, baudrate) : -ENODEV;
+}
+
+int Px4Device::IsCardDataReady(bool &ready)
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return card_open_ ? it930x_bcas_check_ready(&it930x_, &ready) : -ENODEV;
+}
+
+int Px4Device::ReadCardData(std::uint8_t *buf, std::uint8_t &len)
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return card_open_ ? it930x_bcas_get_data(&it930x_, buf, &len) : -ENODEV;
+}
+
+int Px4Device::WriteCardData(const std::uint8_t *buf, std::uint8_t len)
+{
+	std::lock_guard<std::recursive_mutex> lock(lock_);
+	return card_open_ ? it930x_bcas_send_data(&it930x_, buf, len) : -ENODEV;
 }
 
 const i2c_comm_master& Px4Device::GetI2cMaster(int bus) const
@@ -333,7 +463,8 @@ int Px4Device::SetBackendPower(bool state)
 	dev_dbg(&dev_, "px4::Px4Device::SetBackendPower: %s\n", (state) ? "true" : "false");
 
 	int ret = 0;
-	std::lock_guard<std::recursive_mutex> lock(lock_);
+	/* 連動する2基の親ロックを相互取得すると停止するため、GPIO 操作だけを専用ロックで直列化する */
+	std::lock_guard<std::mutex> lock(backend_power_lock_);
 
 	if (!state && !available_)
 		return 0;
@@ -351,11 +482,17 @@ int Px4Device::SetBackendPower(bool state)
 
 		Sleep(20);
 	} else {
-		it930x_write_gpio(&it930x_, 2, false);
-		it930x_write_gpio(&it930x_, 7, true);
+		ret = it930x_write_gpio(&it930x_, 2, false);
+		/*
+		 * GPIO2 の停止に失敗しても基板リセットは試し、終了処理で通電状態が残る範囲を狭める
+		 * 呼び出し元には最初の失敗を返し、初期化時の異常を成功扱いにしない
+		 */
+		int reset_ret = it930x_write_gpio(&it930x_, 7, true);
+		if (!ret)
+			ret = reset_ret;
 	}
 
-	return 0;
+	return ret;
 }
 
 int Px4Device::SetLnbVoltage(std::int32_t voltage)
@@ -457,7 +594,7 @@ void Px4Device::StreamProcess(std::shared_ptr<px4::ReceiverBase::StreamBuffer> s
 
 		for (i = 0; i < PX4_DEVICE_TS_SYNC_COUNT; i++) {
 			if (((i + 1) * 188) <= remain) {
-				if ((p[i * 188] & 0x8f) != 0x07)
+				if (!px4_ts_has_tagged_sync(p[i * 188]))
 					break;
 			} else {
 				sync_remain = true;
@@ -474,7 +611,7 @@ void Px4Device::StreamProcess(std::shared_ptr<px4::ReceiverBase::StreamBuffer> s
 			continue;
 		}
 
-		while (remain >= 188 && ((p[0] & 0x8f) == 0x07)) {
+		while (remain >= 188 && px4_ts_has_tagged_sync(p[0])) {
 			u8 id = (p[0] & 0x70) >> 4;
 
 			if (id && id < 5) {
@@ -547,6 +684,7 @@ Px4Device::MultiDevice::MultiDevice(Px4MultiDeviceMode mode, std::uint64_t seria
 	mode_(mode),
 	dev_{ nullptr, nullptr },
 	power_state_{ false, false },
+	card_state_{ false, false },
 	receiver_state_{ { false, false, false, false }, { false, false, false, false } }
 {
 
@@ -610,6 +748,7 @@ int Px4Device::MultiDevice::Add(Px4Device &dev)
 		return -EALREADY;
 
 	power_state_[dev_id] = false;
+	card_state_[dev_id] = false;
 	for (int i = 0; i < 4; i++)
 		receiver_state_[dev_id][i] = false;
 
@@ -630,7 +769,7 @@ int Px4Device::MultiDevice::Remove(Px4Device &dev)
 	msg_dbg("px4::Px4Device::MultiDevice::Remove\n");
 
 	std::uint8_t dev_id = dev.serial_.dev_id - 1;
-	std::uint8_t other_dev_id = (dev_id) ? 1 : 0;
+	std::uint8_t other_dev_id = dev_id ? 0 : 1;
 
 	if (dev_id > 1)
 		return -EINVAL;
@@ -645,10 +784,11 @@ int Px4Device::MultiDevice::Remove(Px4Device &dev)
 
 	dev_[dev_id] = nullptr;
 	power_state_[dev_id] = false;
+	card_state_[dev_id] = false;
 	for (int i = 0; i < 4; i++)
 		receiver_state_[dev_id][i] = false;
 
-	if (dev_[other_dev_id] && !GetReceiverStatus(other_dev_id) && power_state_[other_dev_id]) {
+	if (dev_[other_dev_id] && !HasPowerUser(other_dev_id) && power_state_[other_dev_id]) {
 		dev_[other_dev_id]->SetBackendPower(false);
 		power_state_[other_dev_id] = false;
 	}
@@ -670,6 +810,11 @@ bool Px4Device::MultiDevice::GetReceiverStatus(std::uint8_t dev_id) const noexce
 {
 	auto &state = receiver_state_[dev_id];
 	return (state[0] || state[1] || state[2] || state[3]);
+}
+
+bool Px4Device::MultiDevice::HasPowerUser(std::uint8_t dev_id) const noexcept
+{
+	return GetReceiverStatus(dev_id) || card_state_[dev_id];
 }
 
 bool Px4Device::MultiDevice::IsPowerIntelockingRequried(std::uint8_t dev_id) const noexcept
@@ -721,7 +866,8 @@ int Px4Device::MultiDevice::SetPower(Px4Device &dev, std::uintptr_t index, bool 
 		receiver_state_[dev_id][index] = false;
 
 	if (!GetReceiverStatus(dev_id)) {
-		if (power_state_[dev_id] != state && (state || !IsPowerIntelockingRequried(other_dev_id))) {
+		if (power_state_[dev_id] != state &&
+			(state || (!card_state_[dev_id] && !IsPowerIntelockingRequried(other_dev_id)))) {
 			ret = dev.SetBackendPower(state);
 			if (ret && state)
 				return ret;
@@ -739,7 +885,8 @@ int Px4Device::MultiDevice::SetPower(Px4Device &dev, std::uintptr_t index, bool 
 	if (dev_[other_dev_id]) {
 		bool interlocking = IsPowerIntelockingRequried(dev_id);
 
-		if (interlocking == state && power_state_[other_dev_id] != interlocking && (state || !GetReceiverStatus(other_dev_id))) {
+		if (interlocking == state && power_state_[other_dev_id] != interlocking &&
+			(state || !HasPowerUser(other_dev_id))) {
 			ret = dev_[other_dev_id]->SetBackendPower(state);
 			if (ret && state)
 				return ret;
@@ -748,6 +895,57 @@ int Px4Device::MultiDevice::SetPower(Px4Device &dev, std::uintptr_t index, bool 
 		}
 	}
 
+	return 0;
+}
+
+int Px4Device::MultiDevice::SetCardPower(Px4Device &dev, bool state)
+{
+	std::uint8_t dev_id = dev.serial_.dev_id - 1;
+	std::uint8_t other_dev_id = dev_id ? 0 : 1;
+
+	if (dev_id > 1)
+		return -EINVAL;
+
+	std::lock_guard<std::mutex> lock(lock_);
+
+	if (dev_[dev_id] != &dev)
+		return -EINVAL;
+	if (card_state_[dev_id] == state)
+		return 0;
+
+	/* カード要求を先に記録し、電源投入失敗時だけ以前の状態へ戻す */
+	bool previous_state = card_state_[dev_id];
+	card_state_[dev_id] = state;
+
+	if (!GetReceiverStatus(dev_id)) {
+		bool should_power = state || IsPowerIntelockingRequried(other_dev_id);
+		if (power_state_[dev_id] != should_power) {
+			int ret = dev.SetBackendPower(should_power);
+			if (ret && should_power) {
+				card_state_[dev_id] = previous_state;
+				return ret;
+			}
+			power_state_[dev_id] = should_power;
+		}
+	}
+
+	return 0;
+}
+
+int Px4Device::MultiDevice::ReleaseCardPower(Px4Device &dev)
+{
+	std::uint8_t dev_id = dev.serial_.dev_id - 1;
+
+	if (dev_id > 1)
+		return -EINVAL;
+
+	std::lock_guard<std::mutex> lock(lock_);
+
+	if (dev_[dev_id] != &dev)
+		return -EINVAL;
+
+	/* デバイス抜去後は電源状態を Remove() に任せ、共有要求だけを消す */
+	card_state_[dev_id] = false;
 	return 0;
 }
 
@@ -788,7 +986,8 @@ Px4Device::Px4Receiver::Px4Receiver(Px4Device &parent, std::uintptr_t index)
 	init_(false),
 	open_(false),
 	lnb_power_(false),
-	streaming_(false)
+	streaming_(false),
+	ts_pin_cleanup_pending_(false)
 {
 	memset(&r850_, 0, sizeof(r850_));
 	memset(&rt710_, 0, sizeof(rt710_));
@@ -923,6 +1122,13 @@ void Px4Device::Px4Receiver::Term()
 	if (!init_)
 		return;
 
+	/* SetCapture() の解除失敗が残っている場合は復調器を破棄する前に再試行する */
+	if (ts_pin_cleanup_pending_) {
+		int ret = SetTsPins(false);
+		if (!ret)
+			ts_pin_cleanup_pending_ = false;
+	}
+
 	switch (system_) {
 	case px4::SystemType::ISDB_T:
 		r850_term(&r850_);
@@ -941,6 +1147,31 @@ void Px4Device::Px4Receiver::Term()
 	init_ = false;
 
 	return;
+}
+
+int Px4Device::Px4Receiver::SetTsPins(bool enabled)
+{
+	int ret = 0;
+
+	switch (system_) {
+	case px4::SystemType::ISDB_T:
+		ret = tc90522_enable_ts_pins_t(&tc90522_, enabled);
+		break;
+
+	case px4::SystemType::ISDB_S:
+		ret = tc90522_enable_ts_pins_s(&tc90522_, enabled);
+		break;
+
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	if (ret)
+		dev_err(&parent_.dev_, "px4::Px4Device::Px4Receiver::SetTsPins(%u): failed. (enabled: %s, ret: %d)\n",
+			index_, (enabled) ? "true" : "false", ret);
+
+	return ret;
 }
 
 int Px4Device::Px4Receiver::InitPrimary()
@@ -988,10 +1219,13 @@ int Px4Device::Px4Receiver::Open()
 			return ret;
 		}
 	} else if (!parent_.open_count_) {
-		ret = parent_.SetBackendPower(true);
-		if (ret) {
-			dev_err(&parent_.dev_, "px4::Px4Device::Px4Receiver::Open(%u): parent_.SetBackendPower(true) failed. (ret: %d)\n", index_, ret);
-			return ret;
+		/* カードが基板電源を保持している場合は再投入せず、受信回路の初期化だけ行う */
+		if (!parent_.card_open_) {
+			ret = parent_.SetBackendPower(true);
+			if (ret) {
+				dev_err(&parent_.dev_, "px4::Px4Device::Px4Receiver::Open(%u): parent_.SetBackendPower(true) failed. (ret: %d)\n", index_, ret);
+				return ret;
+			}
 		}
 		need_init = true;
 	}
@@ -1077,7 +1311,7 @@ int Px4Device::Px4Receiver::Open()
 fail:
 	if (parent_.mldev_)
 		parent_.mldev_->SetPower(parent_, index_, false, nullptr);
-	else if (!parent_.open_count_) 
+	else if (!parent_.open_count_ && !parent_.card_open_)
 		parent_.SetBackendPower(false);
 
 	return ret;
@@ -1105,7 +1339,7 @@ void Px4Device::Px4Receiver::Close()
 				parent_.receivers_[i]->Term();
 		}
 
-		if (!parent_.mldev_)
+		if (!parent_.mldev_ && !parent_.card_open_)
 			parent_.SetBackendPower(false);
 	} else if (parent_.available_) {
 		switch (system_) {
@@ -1362,17 +1596,18 @@ int Px4Device::Px4Receiver::SetCapture(bool capture)
 
 	dev_dbg(&parent_.dev_, "px4::Px4Device::Px4Receiver::SetCapture(%u): capture: %s\n", index_, (capture) ? "true" : "false");
 
-	if ((capture && streaming_) || (!capture && !streaming_))
-		return -EALREADY;
-
 	int ret = 0;
 	std::lock_guard<std::mutex> lock(lock_);
+
+	/* TS ピンの解除だけが残っている場合は停止済みでも再試行する */
+	if ((capture && streaming_) || (!capture && !streaming_ && !ts_pin_cleanup_pending_))
+		return -EALREADY;
 
 	if (capture) {
 		ret = parent_.PrepareCapture();
 		if (ret)
 			return ret;
-	} else {
+	} else if (streaming_) {
 		ret = parent_.StopCapture();
 		if (ret)
 			return ret;
@@ -1381,33 +1616,26 @@ int Px4Device::Px4Receiver::SetCapture(bool capture)
 		streaming_ = false;
 	}
 
-	switch (system_) {
-	case px4::SystemType::ISDB_T:
-		ret = tc90522_enable_ts_pins_t(&tc90522_, capture);
-		if (ret)
-			dev_err(&parent_.dev_, "px4::Px4Device::Px4Receiver::SetCapture(%u): tc90522_enable_ts_pins_t() failed.\n", index_);
+	/* 有効化の途中失敗も解除対象に含め、後続の Close() と Term() から再試行できるようにする */
+	if (capture)
+		ts_pin_cleanup_pending_ = true;
 
-		break;
-
-	case px4::SystemType::ISDB_S:
-		ret = tc90522_enable_ts_pins_s(&tc90522_, capture);
-		if (ret)
-			dev_err(&parent_.dev_, "px4::Px4Device::Px4Receiver::SetCapture(%u): tc90522_enable_ts_pins_s() failed.\n", index_);
-
-		break;
-
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
+	ret = SetTsPins(capture);
 	if (ret)
 		return ret;
 
+	if (!capture)
+		ts_pin_cleanup_pending_ = false;
+
 	if (capture) {
 		ret = parent_.StartCapture();
-		if (ret)
+		if (ret) {
+			/* 解除に失敗した場合は保留状態を維持し、Close() と Term() で再試行する */
+			int rollback_ret = SetTsPins(false);
+			if (!rollback_ret)
+				ts_pin_cleanup_pending_ = false;
 			return ret;
+		}
 
 		std::size_t size = 188 * parent_.config_.device.receiver_max_packets;
 

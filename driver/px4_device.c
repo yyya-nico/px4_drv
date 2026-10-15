@@ -14,6 +14,7 @@
 
 #include "px4_device_params.h"
 #include "firmware.h"
+#include "ts_sync.h"
 
 #define PX4_DEVICE_TS_SYNC_COUNT	4
 #define PX4_DEVICE_TS_SYNC_SIZE		(188 * PX4_DEVICE_TS_SYNC_COUNT)
@@ -197,7 +198,7 @@ static void px4_device_stream_process(struct ptx_chrdev **chrdev,
 
 		for (i = 0; i < PX4_DEVICE_TS_SYNC_COUNT; i++) {
 			if (likely(((i + 1) * 188) <= remain)) {
-				if (unlikely((p[i * 188] & 0x8f) != 0x07))
+				if (unlikely(!px4_ts_has_tagged_sync(p[i * 188])))
 					break;
 			} else {
 				sync_remain = true;
@@ -1366,22 +1367,38 @@ int px4_device_init(struct px4_device *px4, struct device *dev,
 	if (ret)
 		goto fail_device;
 
+	/*
+	 * it930x_init_warm() leaves the tuner board powered,
+	 * so keep it off until a receiver is opened
+	 */
+	/*
+	 * 2基連動モデルも含めてここで停止させ、共有管理へ登録する時点の電源を
+	 * 通電なしへ揃える
+	 * 登録前に通電したままだと、相方の利用状況から決まる電源状態と食い違う
+	 */
+	ret = it930x_write_gpio(it930x, 2, false);
+	if (ret)
+		goto fail_device;
+
+	ret = it930x_write_gpio(it930x, 7, true);
+	if (ret)
+		goto fail_device;
+
 	if (use_mldev) {
-		if (px4_mldev_search(px4->serial.serial_number, &px4->mldev))
+		if (px4_mldev_search(px4->serial.serial_number, &px4->mldev)) {
 			ret = px4_mldev_add(px4->mldev, px4);
-		else
+			/*
+			 * px4_mldev_add() consumes the search reference even
+			 * when the device could not be attached
+			 */
+			if (ret)
+				px4->mldev = NULL;
+		} else {
 			ret = px4_mldev_alloc(&px4->mldev,
 					      px4_device_params.multi_device_power_control_mode,
 					      px4, px4_backend_set_power);
+		}
 
-		if (ret)
-			goto fail_device;
-	} else {
-		ret = it930x_write_gpio(it930x, 7, true);
-		if (ret)
-			goto fail_device;
-
-		ret = it930x_write_gpio(it930x, 2, false);
 		if (ret)
 			goto fail_device;
 	}
