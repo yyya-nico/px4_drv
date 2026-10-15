@@ -1,6 +1,6 @@
 # px4_drv - Unofficial Linux / Windows (WinUSB) driver for PLEX PX4/PX5/PX-MLT series / e-Better DTV series ISDB-T/S receivers
 
-[tsukumijima/px4_drv](https://github.com/tsukumijima/px4_drv) にカードリーダー取扱い機能を足したフォークです。  
+[tsukumijima/px4_drv](https://github.com/tsukumijima/px4_drv) にLinux用の内蔵カードリーダー取扱い機能を足したフォークです。  
 以下の機種で動作確認がてきています。
 - PX-Q3PE5 (まずはカードリーダーを認識まで)
 - PX-W3U4 (まずはカード認識まで)
@@ -117,34 +117,6 @@ PLEX 社の [Webサイト](http://plex-net.co.jp) にて配布されている公
 > PX-M1UR または DTV02(A)-1T1S-U で CATV（周波数変換パススルー）の ISDB-T C13ch ~ C24ch を受信するには、[専用の recpt1 フォーク (hendecarows/recpt1)](https://github.com/hendecarows/recpt1) が必要となります。  
 > [stz2012/recpt1](https://github.com/stz2012/recpt1) や [recisdb](https://github.com/kazuki0824/recisdb-rs) では、当該機種にて C13ch ~ C62ch を正常に選局できないことが報告されています（[詳細はこちら](https://github.com/tsukumijima/px4_drv/issues/16)）。  
 > ただし、C13ch ~ C24ch 以外のチャンネルであれば、stz2012/recpt1 や recisdb でも問題なく選局・受信が可能です。
-
-## スマートカード機能 (Linux版のみ)
-
-Linux版では、スマートカードを標準的なPC/SCインターフェース経由で利用できる機能を提供しています。
-
-### 特徴
-
-- `/dev/px4card*` デバイスノード経由でスマートカードにアクセス可能
-- `pcscd`（PC/SC daemon）対応により、標準的なスマートカードツールが利用可能
-- チューナー機能とは独立して動作
-- ホットプラグに対応
-
-### 使い方
-
-詳しくは [userland/ifd-px4/README.md](userland/ifd-px4/README.md) を参照してください。
-
-```bash
-# IFDハンドラーのビルドとインストール
-cd userland/ifd-px4
-make
-sudo make install
-
-# pcscdの再起動
-sudo systemctl restart pcscd
-
-# カードリーダーの確認
-pcsc_scan
-```
 
 ## インストール (Windows)
 
@@ -388,6 +360,34 @@ gcc, make, カーネルソース/ヘッダ, dkms がインストールされて�
 	/dev/isdb6014video1  /dev/isdb6014video3
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
+
+### 4. 内蔵 B-CAS カードリーダーの利用
+
+Linux版では、スマートカードを標準的なPC/SCインターフェース経由で利用できる機能を提供しています。
+
+### 特徴
+
+- `/dev/px4card*` デバイスノード経由でスマートカードにアクセス可能
+- `pcscd`（PC/SC daemon）対応により、標準的なスマートカードツールが利用可能
+- チューナー機能とは独立して動作
+- ホットプラグに対応
+
+### 使い方
+
+詳しくは [userland/ifd-px4/README.md](userland/ifd-px4/README.md) を参照してください。
+
+```bash
+# IFDハンドラーのビルドとインストール
+cd userland/ifd-px4
+make
+sudo make install
+
+# pcscdの再起動
+sudo systemctl restart pcscd
+
+# カードリーダーの確認
+pcsc_scan
+```
 
 ## アンインストール (Windows)
 
