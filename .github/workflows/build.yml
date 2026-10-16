@@ -71,10 +71,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Build IFD Debian package
-        # upload-artifact のパターンに .. を含めないため、生成先を絶対パスで渡す。
-        run: |
-          ./build_ifd_deb.sh
-          echo "DEB_OUTPUT_DIR=$(cd .. && pwd)" >> "$GITHUB_ENV"
+        run: ./build_ifd_deb.sh
 
       - name: Check IFD package
         env:
@@ -97,10 +94,3 @@ jobs:
           test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
         env:
           DEBIAN_FRONTEND: noninteractive
-
-      - name: Upload IFD package
-        uses: actions/upload-artifact@v7
-        with:
-          name: debian-ifd-${{ matrix.arch }}
-          path: ${{ env.DEB_OUTPUT_DIR }}/px4-ifd_*.deb
-          if-no-files-found: error

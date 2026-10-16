@@ -80,7 +80,7 @@ sudo apt install ../px4-ifd_*.deb
 
 GitHub Actions の `build.yml` では PR と手動実行を対象に、amd64 / arm64 の
 ネイティブランナー上の Ubuntu 22.04 コンテナでパッケージがビルドされます。
-lintian とインストール・削除の検証を通過したパッケージは Artifact から取得できます。
+ビルド後は lintian とインストール・削除の検証結果を確認できます。
 タグの push を対象とする `build_and_release.yml` では、既存の DKMS パッケージと
 IFD の両アーキテクチャの検証がすべて成功すると、3つの `.deb` が同じ Release に添付されます。
 これらの検証はパッケージを対象とするため、実機でのカード通信と TS 同時受信の確認は別途必要です。
