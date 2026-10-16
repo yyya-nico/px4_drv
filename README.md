@@ -228,7 +228,7 @@ BonDriver と同じフォルダに DriverHost_PX4.exe / DriverHost_PX4.ini / it9
 Debian パッケージを使用してインストールすると依存パッケージも自動インストールされるほか、DKMS のソースコード管理も透過的に行われます。  
 Ubuntu / Debian 環境では Debian パッケージを使用してインストールすることを強く推奨します。
 
-	$ wget https://github.com/tsukumijima/px4_drv/releases/download/v0.6.1/px4-drv-dkms_0.6.1_all.deb
+	$ wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.1/px4-drv-dkms_0.6.1_all.deb
 	$ sudo apt install -y ./px4-drv-dkms_0.6.1_all.deb
 
 上記コマンドで、px4_drv の Debian パッケージをインストールできます。

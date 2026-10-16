@@ -10,7 +10,40 @@ px4_drvは、ISDB-T/S（デジタル放送）チューナーのスマートカ�
 - **IFDハンドラー**: pcscd経由でアプリケーションから利用可能
 - **対応デバイス**: PX4, PX-MLT, ISDB2056, PX-M1UR, PX-S1UR等、全てのカードリーダー搭載デバイス
 
-## ビルド
+## Debian パッケージを使用してインストール
+
+Debian / Ubuntu では、リリース済みの Debian パッケージから IFD ハンドラーを
+インストールできます。`apt` を使うと、`pcscd` などの依存パッケージも自動的に導入されます。
+カード機能を提供する px4_drv の導入手順は、[ルートの README](../../README.md#2-ドライバのインストール)を参照してください。
+
+アーキテクチャは `dpkg --print-architecture` で確認できます。表示された値に対応する
+次のいずれかの手順を実行してください。
+
+### amd64 の場合
+
+```bash
+wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.1/px4-ifd_0.6.1_amd64.deb
+sudo apt install -y ./px4-ifd_0.6.1_amd64.deb
+```
+
+### arm64 の場合
+
+```bash
+wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.1/px4-ifd_0.6.1_arm64.deb
+sudo apt install -y ./px4-ifd_0.6.1_arm64.deb
+```
+
+> [!TIP]
+> `px4-drv-dkms` は推奨依存に含まれます。カード機能対応のドライバを DKMS などで
+> 手動導入済みの場合は、上の `apt install` に `--no-install-recommends` を付けると、
+> 推奨依存の追加を避けて IFD ハンドラーをインストールできます。
+
+導入後のカードリーダーの確認方法は、[使い方](#使い方)を参照してください。
+`pcsc_scan` を利用する場合は、`sudo apt install pcsc-tools` で追加できます。
+既に pcscd が動いている場合は、カードを使用する録画などを終了した後で
+`sudo systemctl restart pcscd` を実行してください。
+
+## ソースからのビルド
 
 ### 必要なパッケージ
 
