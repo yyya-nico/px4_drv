@@ -10,7 +10,7 @@ Homepage: https://github.com/yyya-nico/px4_drv
 Package: px4-ifd
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, pcscd
-Recommends: px4-drv-dkms
+Suggests: px4-drv-dkms
 Provides: pcsc-ifd-handler
 Description: PC/SC IFD handler for px4_drv built-in smart card readers
  This pcscd plugin provides access to built-in smart card readers through
