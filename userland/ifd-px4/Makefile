@@ -1,8 +1,8 @@
 # Makefile for PX4 IFD Handler
 
 CC = gcc
-CFLAGS = -Wall -O2 -fPIC -I../../include -I/usr/include/PCSC
-LDFLAGS = -shared
+CFLAGS ?= -Wall -O2
+CPPFLAGS += -I../../include -I/usr/include/PCSC
 
 TARGET = libpx4ifd.so
 SRCS = ifdhandler.c
@@ -14,15 +14,15 @@ PLIST_DIR   = /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) $(LDFLAGS) -shared -o $@ $^
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $<
 
 install: $(TARGET)
-	install -d $(INSTALL_DIR)
-	install -m 0755 $(TARGET) $(INSTALL_DIR)/
-	install -m 0644 Info.plist $(PLIST_DIR)/
+	install -d "$(DESTDIR)$(INSTALL_DIR)"
+	install -m 0644 $(TARGET) "$(DESTDIR)$(INSTALL_DIR)/"
+	install -m 0644 Info.plist "$(DESTDIR)$(PLIST_DIR)/"
 
 clean:
 	rm -f $(OBJS) $(TARGET)

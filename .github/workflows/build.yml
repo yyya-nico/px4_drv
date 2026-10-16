@@ -4,15 +4,17 @@ on:
   pull_request:
     branches:
       - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build and Check Debian Package
+    name: Build and Check DKMS Debian Package
     runs-on: ubuntu-24.04
     container:
       image: ubuntu:20.04
-    permissions:
-      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -42,3 +44,60 @@ jobs:
       - name: Check dkms result
         run: ls -l /lib/modules/*/updates/dkms/px4_drv.ko*
         shell: bash
+
+  build_ifd:
+    name: Build and Check IFD Debian Package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install IFD build dependencies
+        run: apt-get update && apt-get install -y -q --no-install-recommends build-essential debhelper dpkg-dev libpcsclite-dev lintian
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Build IFD Debian package
+        run: ./build_ifd_deb.sh
+
+      - name: Check IFD package
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          packages=(../px4-ifd_*.deb)
+          test "${#packages[@]}" -eq 1
+          test "$(dpkg-deb -f "${packages[0]}" Package)" = px4-ifd
+          test "$(dpkg-deb -f "${packages[0]}" Architecture)" = "$EXPECTED_ARCH"
+          dpkg-deb --contents "${packages[0]}"
+          lintian "${packages[0]}"
+
+      - name: Check IFD install and removal
+        run: |
+          apt-get install -y --no-install-recommends ../px4-ifd_*.deb
+          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
+          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+          apt-get remove -y px4-ifd
+          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
+          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Upload IFD package
+        uses: actions/upload-artifact@v7
+        with:
+          name: debian-ifd-${{ matrix.arch }}
+          path: ../px4-ifd_*.deb
+          if-no-files-found: error

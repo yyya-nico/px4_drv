@@ -36,6 +36,55 @@ cd userland/ifd-px4
 sudo make install
 ```
 
+### Debian パッケージの作成
+
+Debian / Ubuntu では、ルートの `build_ifd_deb.sh` から `debhelper` を使って
+IFD ハンドラー単体のバイナリパッケージを作成できます。
+
+```bash
+sudo apt-get install build-essential debhelper dpkg-dev libpcsclite-dev
+./build_ifd_deb.sh
+```
+
+上の例はリポジトリのルートからの実行例です。スクリプトは任意の作業ディレクトリから
+呼び出せて、引数で出力先ディレクトリを指定できます。
+
+```bash
+./build_ifd_deb.sh /tmp/px4-packages
+```
+
+既定の出力先はリポジトリの1つ上のディレクトリ（ルートから見て `../`）、ファイル名は
+`px4-ifd_<版番号>_<アーキテクチャ>.deb` です。版番号は `update_version.sh` の
+更新対象であるルートの `dkms.conf` から取得するため、パッケージ用の版番号管理は不要です。
+ビルド対象は実行環境のアーキテクチャで、クロスビルドは対象外です。
+
+ソースのコピー、コンパイル、梱包は一時ディレクトリ内で完結するため、
+既存の `.o` / `.so` の削除や再利用は不要で、ビルドに root 権限も不要です。
+`debhelper` によってビルド環境に応じた共有ライブラリ依存関係が付くため、
+配布先の Debian / Ubuntu ごとのビルド環境を用意してください。
+
+生成したパッケージは次のようにインストールできます。
+
+```bash
+sudo apt install ../px4-ifd_*.deb
+```
+
+パッケージには `libpx4ifd.so`、`Info.plist`、説明文書、ライセンス情報が含まれます。
+`pcscd` は必須依存、`px4-drv-dkms` は推奨依存です。カーネルドライバを手動導入する
+構成でも利用できますが、カードデバイスノードを提供する版の px4_drv が別途必要です。
+プラグインの配置先は `make install` と同じ `/usr/lib/pcsc/drivers/` 以下です。
+
+導入時のカード通信の中断を避けるため、パッケージによる pcscd の自動再起動はありません。
+既に pcscd が動いている場合は、カードを使用する録画などを終了した後で
+`sudo systemctl restart pcscd` を実行してください。
+
+GitHub Actions の `build.yml` では PR と手動実行を対象に、amd64 / arm64 の
+ネイティブランナー上の Ubuntu 22.04 コンテナでパッケージがビルドされます。
+lintian とインストール・削除の検証を通過したパッケージは Artifact から取得できます。
+タグの push を対象とする `build_and_release.yml` では、既存の DKMS パッケージと
+IFD の両アーキテクチャの検証がすべて成功すると、3つの `.deb` が同じ Release に添付されます。
+これらの検証はパッケージを対象とするため、実機でのカード通信と TS 同時受信の確認は別途必要です。
+
 ## 使い方
 
 ### 1. カーネルドライバのロード

@@ -1,0 +1,18 @@
+Source: px4-ifd
+Section: misc
+Priority: optional
+Maintainer: yyya-nico <yyya-nico@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 12), libpcsclite-dev
+Standards-Version: 4.5.0
+Rules-Requires-Root: no
+Homepage: https://github.com/yyya-nico/px4_drv
+
+Package: px4-ifd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, pcscd
+Recommends: px4-drv-dkms
+Provides: pcsc-ifd-handler
+Description: PC/SC IFD handler for px4_drv built-in smart card readers
+ This pcscd plugin provides access to built-in smart card readers through
+ the card device nodes exposed by the px4_drv kernel driver.
+ A version of px4_drv with built-in card reader support is required.

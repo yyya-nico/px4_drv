@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --sourcedirectory=userland/ifd-px4
+
+# 配布対象を IFD ハンドラーの単一パッケージに揃える。
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

@@ -5,14 +5,15 @@ on:
     tags:
       - "*"
 
+permissions:
+  contents: read
+
 jobs:
-  build_and_release:
-    name: Build and Release Debian Package
+  build_dkms:
+    name: Build and Check DKMS Debian Package
     runs-on: ubuntu-24.04
     container:
       image: ubuntu:20.04
-    permissions:
-      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -43,9 +44,102 @@ jobs:
         run: ls -l /lib/modules/*/updates/dkms/px4_drv.ko*
         shell: bash
 
+      - name: Upload DKMS package
+        uses: actions/upload-artifact@v7
+        with:
+          name: debian-dkms
+          path: ../px4-drv-dkms_*.deb
+          if-no-files-found: error
+
+  build_ifd:
+    name: Build and Check IFD Debian Package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install IFD build dependencies
+        run: apt-get update && apt-get install -y -q --no-install-recommends build-essential debhelper dpkg-dev libpcsclite-dev lintian
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Build IFD Debian package
+        run: ./build_ifd_deb.sh
+
+      - name: Check IFD package
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          packages=(../px4-ifd_*.deb)
+          test "${#packages[@]}" -eq 1
+          test "$(dpkg-deb -f "${packages[0]}" Package)" = px4-ifd
+          test "$(dpkg-deb -f "${packages[0]}" Architecture)" = "$EXPECTED_ARCH"
+          dpkg-deb --contents "${packages[0]}"
+          lintian "${packages[0]}"
+
+      - name: Check IFD install and removal
+        run: |
+          apt-get install -y --no-install-recommends ../px4-ifd_*.deb
+          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
+          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+          apt-get remove -y px4-ifd
+          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
+          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Upload IFD package
+        uses: actions/upload-artifact@v7
+        with:
+          name: debian-ifd-${{ matrix.arch }}
+          path: ../px4-ifd_*.deb
+          if-no-files-found: error
+
+  release:
+    name: Release Debian Packages
+    needs: [build_dkms, build_ifd]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Debian packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: debian-*
+          merge-multiple: true
+          path: packages
+
+      - name: Check release packages
+        shell: bash
+        run: |
+          dkms_packages=(packages/px4-drv-dkms_*_all.deb)
+          amd64_packages=(packages/px4-ifd_*_amd64.deb)
+          arm64_packages=(packages/px4-ifd_*_arm64.deb)
+          for package_group in dkms_packages amd64_packages arm64_packages; do
+            declare -n packages_ref="$package_group"
+            test "${#packages_ref[@]}" -eq 1
+            test -f "${packages_ref[0]}"
+          done
+
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            ../*.deb
+            packages/px4-drv-dkms_*_all.deb
+            packages/px4-ifd_*_amd64.deb
+            packages/px4-ifd_*_arm64.deb
