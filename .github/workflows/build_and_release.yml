@@ -25,7 +25,10 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Build Debian package
-        run: dkms mkdeb --source-only
+        # upload-artifact のパターンに .. を含めないため、生成先を絶対パスで渡す。
+        run: |
+          dkms mkdeb --source-only
+          echo "DEB_OUTPUT_DIR=$(cd .. && pwd)" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Check artifacts
@@ -48,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: debian-dkms
-          path: ../px4-drv-dkms_*.deb
+          path: ${{ env.DEB_OUTPUT_DIR }}/px4-drv-dkms_*.deb
           if-no-files-found: error
 
   build_ifd:
@@ -77,7 +80,10 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Build IFD Debian package
-        run: ./build_ifd_deb.sh
+        # upload-artifact のパターンに .. を含めないため、生成先を絶対パスで渡す。
+        run: |
+          ./build_ifd_deb.sh
+          echo "DEB_OUTPUT_DIR=$(cd .. && pwd)" >> "$GITHUB_ENV"
 
       - name: Check IFD package
         env:
@@ -105,7 +111,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: debian-ifd-${{ matrix.arch }}
-          path: ../px4-ifd_*.deb
+          path: ${{ env.DEB_OUTPUT_DIR }}/px4-ifd_*.deb
           if-no-files-found: error
 
   release:
