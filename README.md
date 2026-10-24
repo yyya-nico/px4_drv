@@ -292,61 +292,63 @@ gcc, make, カーネルソース/ヘッダ, dkms がインストールされて�
 
 ##### PLEX PX-W3U4/W3PE4/W3PE5 を接続した場合
 
-	$ ls /dev/px4video*
-	/dev/px4video0  /dev/px4video1  /dev/px4video2  /dev/px4video3
+	$ ls /dev/px4*
+	/dev/px4card0   /dev/px4video0  /dev/px4video1  /dev/px4video2
+	/dev/px4video3
 
 チューナーは、`px4video0` から ISDB-S, ISDB-S, ISDB-T, ISDB-T というように、SとTが2つずつ交互に割り当てられます。
 
 ##### PLEX PX-Q3U4/Q3PE4/Q3PE5 を接続した場合
 
-	$ ls /dev/px4video*
-	/dev/px4video0  /dev/px4video2  /dev/px4video4  /dev/px4video6
-	/dev/px4video1  /dev/px4video3  /dev/px4video5  /dev/px4video7
+	$ ls /dev/px4*
+	/dev/px4card0   /dev/px4video0  /dev/px4video2  /dev/px4video4
+	/dev/px4video6  /dev/px4video1  /dev/px4video3  /dev/px4video5
+	/dev/px4video7
 
 チューナーは、`px4video0` から ISDB-S, ISDB-S, ISDB-T, ISDB-T, ISDB-S, ISDB-S, ISDB-T, ISDB-T というように、S と T が2つずつ交互に割り当てられます。
 
 ##### PLEX PX-MLT5PE / e-Better DTV02A-5TS-P を接続した場合
 
-	$ ls /dev/pxmlt5video*
-	/dev/pxmlt5video0  /dev/pxmlt5video2  /dev/pxmlt5video4
-	/dev/pxmlt5video1  /dev/pxmlt5video3
+	$ ls /dev/pxmlt5*
+	/dev/pxmlt5card0   /dev/pxmlt5video0  /dev/pxmlt5video2
+	/dev/pxmlt5video4  /dev/pxmlt5video1  /dev/pxmlt5video3
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
 
 ##### PLEX PX-MLT8PE を接続した場合
 
-	$ ls /dev/pxmlt8video*
-	/dev/pxmlt8video0  /dev/pxmlt8video3  /dev/pxmlt8video6
-	/dev/pxmlt8video1  /dev/pxmlt8video4  /dev/pxmlt8video7
-	/dev/pxmlt8video2  /dev/pxmlt8video5
+	$ ls /dev/pxmlt8*
+	/dev/pxmlt8card0   /dev/pxmlt8video0  /dev/pxmlt8video3
+	/dev/pxmlt8video6  /dev/pxmlt8video1  /dev/pxmlt8video4
+	/dev/pxmlt8video7  /dev/pxmlt8video2  /dev/pxmlt8video5
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
 
 ##### PLEX PX-M1UR を接続した場合
 
-	$ ls /dev/pxm1urvideo*
-	/dev/pxm1urvideo0
+	$ ls /dev/pxm1ur*
+	/dev/pxm1urcard0  /dev/pxm1urvideo0
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
 
 ##### PLEX PX-S1UR を接続した場合
 
-	$ ls /dev/pxs1urvideo*
-	/dev/pxs1urvideo0
+	$ ls /dev/pxs1ur*
+	/dev/pxs1urcard0  /dev/pxs1urvideo0
 
 すべてのチューナーにおいて、ISDB-T のみ受信可能です。
 
 ##### e-Better DTV03A-1TU を接続した場合
 
-	$ ls /dev/isdbt2071video*
-	/dev/isdbt2071video0
+	$ ls /dev/isdbt2071*
+	/dev/isdbt2071card0  /dev/isdbt2071video0
 
 すべてのチューナーにおいて、ISDB-T のみ受信可能です。
 
 ##### e-Better DTV02-1T1S-U/DTV02A-1T1S-U を接続した場合
 
-	$ ls /dev/isdb2056video*
-	/dev/isdb2056video0
+	$ ls /dev/isdb2056*
+	/dev/isdb2056card0  /dev/isdb2056video0
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
 
@@ -356,8 +358,8 @@ gcc, make, カーネルソース/ヘッダ, dkms がインストールされて�
 
 ##### e-Better DTV02A-4TS-P を接続した場合
 
-	$ ls /dev/isdb6014video*
-	/dev/isdb6014video0  /dev/isdb6014video2
+	$ ls /dev/isdb6014*
+	/dev/isdb6014card0   /dev/isdb6014video0  /dev/isdb6014video2
 	/dev/isdb6014video1  /dev/isdb6014video3
 
 すべてのチューナーにおいて、ISDB-T と ISDB-S のどちらも受信可能です。
@@ -368,7 +370,7 @@ Linux版では、スマートカードを標準的なPC/SCインターフェー�
 
 ### 特徴
 
-- `/dev/px4card*` デバイスノード経由でスマートカードにアクセス可能
+- `/dev/px4card*` などのデバイスノード経由でスマートカードにアクセス可能
 - `pcscd`（PC/SC daemon）対応により、標準的なスマートカードツールが利用可能
 - チューナー機能とは独立して動作
 - ホットプラグに対応
