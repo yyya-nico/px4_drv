@@ -76,6 +76,7 @@ static int xit_sqr100_backend_set_power(struct xit_sqr100_device *xit,
 static int xit_sqr100_card_backend_acquire(void *priv)
 {
 	int ret = 0;
+	bool power_on = false;
 	struct xit_sqr100_device *xit = priv;
 	struct it930x_bridge *it930x = &xit->it930x;
 
@@ -85,10 +86,20 @@ static int xit_sqr100_card_backend_acquire(void *priv)
 		ret = xit_sqr100_backend_set_power(xit, true);
 		if (ret)
 			goto exit;
+		power_on = true;
 	}
 
 	/* XIT-SQR100 は ATR を受信するために、GPIO H7 を出力 Low に設定する。 */
-	it930x_write_gpio(it930x, 7, false);
+	ret = it930x_write_gpio(it930x, 7, false);
+	if (ret) {
+		if (power_on)
+			xit_sqr100_backend_set_power(xit, false);
+
+		dev_err(xit->dev,
+			"xit_sqr100_card_backend_acquire: it930x_write_gpio(7, false) failed. (ret: %d)\n",
+			ret);
+		goto exit;
+	}
 
 	xit->card_open_count++;
 
