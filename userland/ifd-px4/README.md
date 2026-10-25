@@ -22,15 +22,15 @@ Debian / Ubuntu では、リリース済みの Debian パッケージから IFD 
 ### amd64 の場合
 
 ```bash
-wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.11/px4-ifd_0.6.11_amd64.deb
-sudo apt install -y ./px4-ifd_0.6.11_amd64.deb
+wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.12/px4-ifd_0.6.12_amd64.deb
+sudo apt install -y ./px4-ifd_0.6.12_amd64.deb
 ```
 
 ### arm64 の場合
 
 ```bash
-wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.11/px4-ifd_0.6.11_arm64.deb
-sudo apt install -y ./px4-ifd_0.6.11_arm64.deb
+wget https://github.com/yyya-nico/px4_drv/releases/download/v0.6.12/px4-ifd_0.6.12_arm64.deb
+sudo apt install -y ./px4-ifd_0.6.12_arm64.deb
 ```
 
 > [!TIP]
