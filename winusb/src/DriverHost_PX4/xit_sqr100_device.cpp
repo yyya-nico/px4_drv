@@ -45,6 +45,7 @@ int XitSqr100Device::Init()
 	bridge_.bus.usb.ctrl_timeout = 3000;
 	bridge_.config.xfer_size = 188 * xfer_packets_;
 	bridge_.config.i2c_speed = 7;
+	bridge_.bcas_is_extend = true;
 
 	for (int i = 0; i < 5; ++i)
 		bridge_.config.input[i].port_number = static_cast<u8>(i);
