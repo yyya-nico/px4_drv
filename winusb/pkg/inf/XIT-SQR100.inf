@@ -1,0 +1,44 @@
+;
+; PIXELA XIT-SQR100 WinUSB
+;
+[Version]
+Signature="$Windows NT$"
+Class=Media
+ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider=%AuthorName%
+DriverVer=10/06/2026,26.10.06.00
+CatalogFile=px4_drv_winusb.cat
+
+[Manufacturer]
+%AuthorName%=XITSQR100_WinUSB,ntx86,ntamd64,ntarm64
+
+[XITSQR100_WinUSB.ntx86]
+%XITSQR100_WinUSB.DeviceDesc%=XITSQR100_WinUSB.DeviceInstall,USB\VID_06b8&PID_106b
+
+[XITSQR100_WinUSB.ntamd64]
+%XITSQR100_WinUSB.DeviceDesc%=XITSQR100_WinUSB.DeviceInstall,USB\VID_06b8&PID_106b
+
+[XITSQR100_WinUSB.ntarm64]
+%XITSQR100_WinUSB.DeviceDesc%=XITSQR100_WinUSB.DeviceInstall,USB\VID_06b8&PID_106b
+
+[XITSQR100_WinUSB.DeviceInstall]
+Include=winusb.inf
+Needs=WINUSB.NT
+AddProperty=XITSQR100_WinUSB.DeviceSetup.AddProperty
+
+[XITSQR100_WinUSB.DeviceInstall.Services]
+Include=winusb.inf
+Needs=WINUSB.NT.Services
+
+[XITSQR100_WinUSB.DeviceInstall.HW]
+AddReg=XITSQR100_WinUSB.DeviceSetup.AddReg
+
+[XITSQR100_WinUSB.DeviceSetup.AddReg]
+HKR,,DeviceInterfaceGUIDs,0x00010000,"{549967c7-74e1-49ec-94d1-fb8c0aa5b391}"
+
+[XITSQR100_WinUSB.DeviceSetup.AddProperty]
+{afd97640-86a3-4210-b67c-289c41aabe55},3,0x00000011,,0   ;DEVPKEY_Device_SafeRemovalRequiredOverride=FALSE
+
+[Strings]
+AuthorName="px4_drv"
+XITSQR100_WinUSB.DeviceDesc="PIXELA XIT-SQR100 ISDB-T/S Receiver Device (WinUSB)"

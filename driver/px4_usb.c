@@ -27,6 +27,7 @@
 #include "isdb2056_device.h"
 #include "s1ur_device.h"
 #include "m1ur_device.h"
+#include "xit_sqr100_device.h"
 
 #ifndef PX4_USB_MAX_DEVICE
 #define PX4_USB_MAX_DEVICE	16
@@ -68,6 +69,11 @@
 #endif
 #define ISDBT2071_USB_MAX_CHRDEV	(ISDBT2071_USB_MAX_DEVICE * ISDBT2071_CHRDEV_NUM)
 
+#ifndef XITSQR100_USB_MAX_DEVICE
+#define XITSQR100_USB_MAX_DEVICE	64
+#endif
+#define XITSQR100_USB_MAX_CHRDEV	(XITSQR100_USB_MAX_DEVICE * XITSQR100_CHRDEV_NUM)
+
 
 struct px4_usb_context {
 	enum px4_usb_device_type type;
@@ -78,6 +84,7 @@ struct px4_usb_context {
 		struct isdb2056_device isdb2056;
 		struct m1ur_device m1ur;
 		struct s1ur_device s1ur;
+		struct xit_sqr100_device xit;
 	} ctx;
 };
 
@@ -100,6 +107,7 @@ static int px4_usb_init_bridge(struct device *dev, struct usb_device *usb_dev,
 	it930x->dev = dev;
 	it930x->config.xfer_size = 188 * px4_usb_params.xfer_packets;
 	it930x->config.i2c_speed = 0x07;
+	it930x->bcas_is_extend = false;
 
 	return 0;
 }
@@ -281,6 +289,32 @@ static int px4_usb_probe(struct usb_interface *intf,
 		break;
 	}
 
+	case 0x06b8:
+	{
+		switch (id->idProduct) {
+		case USB_PID_XIT_SQR100:
+			ret = px4_usb_init_bridge(dev, usb_dev,
+						  &ctx->ctx.xit.it930x);
+			if (ret)
+				break;
+			/* XIT-SQR100 は拡張配線のカードリーダー設定を使う。 */
+			ctx->ctx.xit.it930x.bcas_is_extend = true;
+
+			ctx->type = XITSQR100_USB_DEVICE;
+			ret = xit_sqr100_device_init(&ctx->ctx.xit, dev,
+						     px4_usb_chrdev_ctx[XITSQR100_USB_DEVICE],
+						     px4_usb_card_ctx_group[XITSQR100_USB_DEVICE],
+						     &ctx->quit_completion);
+			break;
+
+		default:
+			ret = -EINVAL;
+			break;
+		}
+
+		break;
+	}
+
 	default:
 		ret = -EINVAL;
 		break;
@@ -342,6 +376,11 @@ static void px4_usb_disconnect(struct usb_interface *intf)
 		wait_for_completion(&ctx->quit_completion);
 		break;
 
+	case XITSQR100_USB_DEVICE:
+		xit_sqr100_device_term(&ctx->ctx.xit);
+		wait_for_completion(&ctx->quit_completion);
+		break;
+
 	default:
 		/* unknown device */
 		break;
@@ -383,6 +422,7 @@ static const struct usb_device_id px4_usb_ids[] = {
 	{ USB_DEVICE(0x0511, USB_PID_PX_M1UR) },
 	{ USB_DEVICE(0x0511, USB_PID_PX_S1UR) },
 	{ USB_DEVICE(0x0511, USB_PID_DIGIBEST_ISDBT2071) },
+	{ USB_DEVICE(0x06b8, USB_PID_XIT_SQR100) },
 	{ 0 }
 };
 
@@ -413,6 +453,7 @@ static struct usb_driver px4_usb_driver = {
 	pr_debug("px4_usb_register: PXM1UR_USB_MAX_DEVICE: %d\n", PXM1UR_USB_MAX_DEVICE);
 	pr_debug("px4_usb_register: PXS1UR_USB_MAX_DEVICE: %d\n", PXS1UR_USB_MAX_DEVICE);
 	pr_debug("px4_usb_register: ISDBT2071_USB_MAX_DEVICE: %d\n", ISDBT2071_USB_MAX_DEVICE);
+	pr_debug("px4_usb_register: XITSQR100_USB_MAX_DEVICE: %d\n", XITSQR100_USB_MAX_DEVICE);
 
 	memset(&px4_usb_chrdev_ctx, 0, sizeof(px4_usb_chrdev_ctx));
 	memset(&px4_usb_card_ctx_group, 0, sizeof(px4_usb_card_ctx_group));
@@ -537,6 +578,21 @@ static struct usb_driver px4_usb_driver = {
 		goto fail_isdbt2071;
 	}
 
+	ret = ptx_chrdev_context_create("xitsqr100", "sqr100video",
+					XITSQR100_USB_MAX_CHRDEV,
+					&px4_usb_chrdev_ctx[XITSQR100_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: ptx_chrdev_context_create(\"xitsqr100\") failed.\n");
+		goto fail_xitsqr100;
+	}
+
+	ret = px4_card_context_create("xitsqr100", "sqr100card", XITSQR100_USB_MAX_DEVICE,
+				      &px4_usb_card_ctx_group[XITSQR100_USB_DEVICE]);
+	if (ret) {
+		pr_err("px4_usb_register: px4_card_context_create(\"sqr100card\") failed.\n");
+		goto fail_xitsqr100;
+	}
+
 	ret = usb_register(&px4_usb_driver);
 	if (ret) {
 		pr_err("px4_usb_register: usb_register() failed.\n");
@@ -546,6 +602,10 @@ static struct usb_driver px4_usb_driver = {
 	return 0;
 
 fail_usb:
+	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[XITSQR100_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[XITSQR100_USB_DEVICE]);
+
+fail_xitsqr100:
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
 	px4_card_context_destroy(px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE]);
 
@@ -588,6 +648,8 @@ fail:
 #endif
 {
 	usb_deregister(&px4_usb_driver);
+	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[XITSQR100_USB_DEVICE]);
+	px4_card_context_destroy(px4_usb_card_ctx_group[XITSQR100_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[ISDBT2071_USB_DEVICE]);
 	px4_card_context_destroy(px4_usb_card_ctx_group[ISDBT2071_USB_DEVICE]);
 	ptx_chrdev_context_destroy(px4_usb_chrdev_ctx[PXS1UR_USB_DEVICE]);

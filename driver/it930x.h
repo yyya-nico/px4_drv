@@ -70,6 +70,8 @@ struct it930x_bridge {
 	struct itedtv_bus bus;
 	struct it930x_config config;
 	struct i2c_comm_master i2c_master[3];
+	/* XIT-SQR100 のみ true。B-CAS の GPIO 配線・検出極性を切り替える。 */
+	bool bcas_is_extend;
 	void *priv;
 };
 

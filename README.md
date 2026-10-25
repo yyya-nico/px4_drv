@@ -104,6 +104,10 @@ PLEX 社の [Webサイト](http://plex-net.co.jp) にて配布されている公
 	- DTV03A-1TU (実験的)
 	  - チップ構成が大幅に変更された、ロット番号 2021-11 以降の個体のみ対応しています。
 
+- その他
+
+	- XIT-SQR100 (実験的)
+
 > [!NOTE]
 > 2021 年以降メンテナンスされていない [nns779/px4_drv](https://github.com/nns779/px4_drv) と異なり、新規に下記チューナーのサポートを追加しています。
 > 
@@ -113,6 +117,7 @@ PLEX 社の [Webサイト](http://plex-net.co.jp) にて配布されている公
 > - e-Better DTV02A-1T1S-U / Digibest ISDB2056 (Windows 版ドライバを新規追加)
 > - e-Better DTV02A-1T1S-U (ロット番号 2309 以降) / Digibest ISDB2056N
 > - e-Better DTV03A-1TU / Digibest ISDBT2071 (ロット番号 2021-11 以降)
+> - XIT-SQR100 (実験的)
 
 > [!WARNING]
 > PX-M1UR または DTV02(A)-1T1S-U で CATV（周波数変換パススルー）の ISDB-T C13ch ~ C24ch を受信するには、[専用の recpt1 フォーク (hendecarows/recpt1)](https://github.com/hendecarows/recpt1) が必要となります。  
@@ -152,6 +157,7 @@ certutil.exe -addstore TrustedPublisher ".\px4_drv_winusb.cer"
 
 - PX4/PX5 シリーズの機種: `BonDriver_PX4`
 - PX-MLT シリーズの機種・DTV02A-4TS-P・DTV02A-5TS-P: `BonDriver_PX-MLT`
+- XIT-SQR100: `BonDriver_XIT-SQR100` (実験的)
 - DTV02A-1T1S-U: `BonDriver_ISDB2056`
 - DTV02A-1T1S-U (ロット番号 2309 以降): `BonDriver_ISDB2056N`
 - DTV03A-1TU: `BonDriver_ISDBT2071`

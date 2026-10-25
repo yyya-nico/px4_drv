@@ -732,6 +732,8 @@ static const struct px4_vid_pid_entry px4_vid_pid_table[] = {
 	{ 0x0511, 0x0855, "pxs1urcard"   }, /* PX-S1UR     */
 	/* DTV03A-1TU (--> isdbt2071card) */
 	{ 0x0511, 0x0052, "isdbt2071card" }, /* ISDBT2071   */
+	/* XIT-SQR100 (--> sqr100card) */
+	{ 0x06b8, 0x106b, "sqr100card"   }, /* XIT-SQR100 */
 	{ 0, 0, NULL }
 };
 
@@ -756,6 +758,7 @@ static const char * const px4_card_prefixes[] = {
 	"pxm1urcard",
 	"pxs1urcard",
 	"isdbt2071card",
+	"sqr100card",
 	NULL
 };
 /* Try indices 0..PX4_CARD_AUTO_MAX_IDX-1 for each prefix */

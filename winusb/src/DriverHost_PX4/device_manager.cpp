@@ -12,6 +12,7 @@
 #include "pxmlt_device.hpp"
 #include "isdb2056_device.hpp"
 #include "isdbt2071_device.hpp"
+#include "xit_sqr100_device.hpp"
 
 namespace px4 {
 
@@ -55,6 +56,8 @@ DeviceManager::DeviceManager(const px4::DeviceDefinitionSet &device_defs, px4::R
 			type = DeviceType::ISDB2056;
 		else if (it->first == L"ISDBT2071")
 			type = DeviceType::ISDBT2071;
+		else if (it->first == L"XITSQR100")
+			type = DeviceType::XITSQR100;
 
 		if (type == DeviceType::UNKNOWN)
 			continue;
@@ -183,6 +186,16 @@ void DeviceManager::Add(const std::wstring &path, const std::pair<DeviceType, px
 			devices_.emplace(path, std::move(dev));
 		}
 
+		break;
+	}
+
+	case px4::DeviceType::XITSQR100:
+	{
+		auto dev = std::make_shared<XitSqr100Device>(path, def.second, ++index_, receiver_manager_);
+		if (!dev->Init()) {
+			card_reader_generation_.fetch_add(1);
+			devices_.emplace(path, std::move(dev));
+		}
 		break;
 	}
 

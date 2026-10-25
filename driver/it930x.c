@@ -1196,6 +1196,8 @@ int it930x_bcas_init(struct it930x_bridge *it930x)
 {
 	u8 mode = 1;
 	struct it930x_ctrl_buf write_buf;
+	bool is_extend = it930x->bcas_is_extend;
+	int detect_gpio;
 	int ret;
 
 	write_buf.buf = &mode;
@@ -1206,19 +1208,25 @@ int it930x_bcas_init(struct it930x_bridge *it930x)
 		return ret;
 
 	/* カード検出は頻繁に呼ばれるため GPIO H6 の入力設定は初期化時に済ませる */
-	return it930x_set_gpio_mode(it930x, 6, IT930X_GPIO_IN, true);
+	/* XIT-SQR100 では GPIO H15 を入力設定 */
+	detect_gpio = is_extend ? 15 : 6;
+	return it930x_set_gpio_mode(it930x, detect_gpio, IT930X_GPIO_IN, true);;
 }
 
 int it930x_bcas_reset_card(struct it930x_bridge *it930x)
 {
+	bool is_extend = it930x->bcas_is_extend;
+	int reset_gpio;
 	int ret;
 
 	/* B-CAS のリセット線は GPIO H14 に接続されている */
-	ret = it930x_set_gpio_mode(it930x, 14, IT930X_GPIO_OUT, true);
+	/* XIT-SQR100 では GPIO H1 に接続 */
+	reset_gpio = is_extend ? 1 : 14;
+	ret = it930x_set_gpio_mode(it930x, reset_gpio, IT930X_GPIO_OUT, true);
 	if (ret)
 		return ret;
 
-	ret = it930x_write_gpio(it930x, 14, false);
+	ret = it930x_write_gpio(it930x, reset_gpio, false);
 	if (ret)
 		return ret;
 
@@ -1232,7 +1240,7 @@ int it930x_bcas_reset_card(struct it930x_bridge *it930x)
 		return ret;
 
 	msleep(5);
-	return it930x_write_gpio(it930x, 14, true);
+	return it930x_write_gpio(it930x, reset_gpio, true);
 }
 
 int it930x_bcas_check_ready(struct it930x_bridge *it930x, bool *ready)
@@ -1334,17 +1342,22 @@ int it930x_bcas_send_data(struct it930x_bridge *it930x, const u8 *buf, u8 len)
 
 int it930x_bcas_detect_card(struct it930x_bridge *it930x, bool *detected)
 {
+	bool high;
+	bool is_extend = it930x->bcas_is_extend;
+	int detect_gpio;
 	int ret;
 
 	if (!detected)
 		return -EINVAL;
 
 	/* カード検出スイッチは GPIO H6 の Low Active 入力 */
-	ret = it930x_read_gpio(it930x, 6, detected);
+	/* XIT-SQR100 では GPIO H15 の High Active 入力 */
+	detect_gpio = is_extend ? 15 : 6;
+	ret = it930x_read_gpio(it930x, detect_gpio, &high);
 	if (ret)
 		return ret;
 
-	*detected = !*detected;
+	*detected = high == is_extend;
 	return 0;
 }
 

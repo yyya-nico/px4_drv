@@ -21,6 +21,8 @@
 struct cxd2856er_config {
 	u32 xtal;
 	bool tuner_i2c;
+	/* XIT-SQR100 の serial TS 配線に合わせたクロック設定を選ぶ。 */
+	bool serial_ts_clock;
 };
 
 enum cxd2856er_state {
