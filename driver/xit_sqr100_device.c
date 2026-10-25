@@ -77,6 +77,7 @@ static int xit_sqr100_card_backend_acquire(void *priv)
 {
 	int ret = 0;
 	struct xit_sqr100_device *xit = priv;
+	struct it930x_bridge *it930x = &xit->it930x;
 
 	mutex_lock(&xit->lock);
 
@@ -85,6 +86,9 @@ static int xit_sqr100_card_backend_acquire(void *priv)
 		if (ret)
 			goto exit;
 	}
+
+	/* XIT-SQR100 は ATR を受信するために、GPIO H7 を出力 Low に設定する。 */
+	it930x_write_gpio(it930x, 7, false);
 
 	xit->card_open_count++;
 
