@@ -38,3 +38,8 @@ sed -i -e "s/px4-drv-dkms_[0-9]\+\.[0-9]\+\.[0-9]\+_all\.deb/px4-drv-dkms_${vers
 sed -i -e "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${version}/g" README.md
 sed -i -e "s/px4_drv-[0-9]\+\.[0-9]\+\.[0-9]\+/px4_drv-${version}/g" README.md
 sed -i -e "s/px4_drv\/[0-9]\+\.[0-9]\+\.[0-9]\+/px4_drv\/${version}/g" README.md
+
+# Update version in userland/ifd-px4/README.md
+sed -i -e "s/px4-ifd_[0-9]\+\.[0-9]\+\.[0-9]\+_amd64\.deb/px4-ifd_${version}_amd64.deb/g" userland/ifd-px4/README.md
+sed -i -e "s/px4-ifd_[0-9]\+\.[0-9]\+\.[0-9]\+_arm64\.deb/px4-ifd_${version}_arm64.deb/g" userland/ifd-px4/README.md
+sed -i -e "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${version}/g" userland/ifd-px4/README.md
