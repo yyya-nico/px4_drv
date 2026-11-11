@@ -75,7 +75,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install IFD build dependencies
-        run: apt-get update && apt-get install -y -q --no-install-recommends build-essential debhelper dpkg-dev libpcsclite-dev lintian
+        run: apt-get update && apt-get install -y -q --no-install-recommends build-essential debhelper dpkg-dev libpcsclite-dev pkg-config lintian
         env:
           DEBIAN_FRONTEND: noninteractive
 
@@ -98,12 +98,15 @@ jobs:
 
       - name: Check IFD install and removal
         run: |
+          driver_dir=$(pkg-config --variable=usbdropdir libpcsclite)
+          test -n "$driver_dir"
+          bundle_dir="$driver_dir/ifd-px4.bundle/Contents"
           apt-get install -y --no-install-recommends ../px4-ifd_*.deb
-          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
-          test -f /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+          test -f "$bundle_dir/Linux/libpx4ifd.so"
+          test -f "$bundle_dir/Info.plist"
           apt-get remove -y px4-ifd
-          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
-          test ! -e /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
+          test ! -e "$bundle_dir/Linux/libpx4ifd.so"
+          test ! -e "$bundle_dir/Info.plist"
         env:
           DEBIAN_FRONTEND: noninteractive
 

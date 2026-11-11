@@ -65,10 +65,10 @@ Docker イメージ作成時はデバイスが接続されていないため、�
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install build-essential libpcsclite-dev pcscd pcsc-tools
+sudo apt-get install build-essential libpcsclite-dev pkg-config pcscd pcsc-tools
 
 # Fedora/RHEL
-sudo dnf install gcc make pcsc-lite-devel pcsc-lite pcsc-tools
+sudo dnf install gcc make pcsc-lite-devel pkgconf-pkg-config pcsc-lite pcsc-tools
 ```
 
 ### IFDハンドラーのビルド
@@ -85,13 +85,21 @@ cd userland/ifd-px4
 sudo make install
 ```
 
+配置先は `pkg-config --variable=usbdropdir libpcsclite` で確認できます。
+値が取得できない場合や、独自ビルドの pcscd を使う場合は、
+その pcscd が検索するディレクトリを `PCSC_DRIVER_DIR` に指定してください。
+
+```bash
+sudo make install PCSC_DRIVER_DIR=/usr/lib64/pcsc/drivers
+```
+
 ### Debian パッケージの作成
 
 Debian / Ubuntu では、ルートの `build_ifd_deb.sh` から `debhelper` を使って
 IFD ハンドラー単体のバイナリパッケージを作成できます。
 
 ```bash
-sudo apt-get install build-essential debhelper dpkg-dev libpcsclite-dev
+sudo apt-get install build-essential debhelper dpkg-dev libpcsclite-dev pkg-config
 ./build_ifd_deb.sh
 ```
 
@@ -122,7 +130,7 @@ sudo apt install ../px4-ifd_*.deb
 `pcscd` は必須依存、`px4-drv-dkms` は関連パッケージの案内（`Suggests`）です。
 カーネルドライバの手動導入や Docker コンテナ内での利用でも、カードデバイスノードを
 提供する版の px4_drv がホスト側に必要です。
-プラグインの配置先は `make install` と同じ `/usr/lib/pcsc/drivers/` 以下です。
+プラグインは、パッケージのビルド環境で取得した `usbdropdir` 以下に配置されます。
 
 導入時のカード通信の中断を避けるため、パッケージによる pcscd の自動再起動はありません。
 既に pcscd が動いている場合は、カードを使用する録画などを終了した後で
@@ -208,11 +216,12 @@ sudo cat /dev/px4card0 | hexdump -C
 ### pcscdがリーダーを認識しない
 
 ```bash
-# 設定ファイルの確認
-cat /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Info.plist
-
-# IFDハンドラーのインストール確認
-ls -l /usr/lib/pcsc/drivers/ifd-px4.bundle/Contents/Linux/libpx4ifd.so
+driver_dir=$(pkg-config --variable=usbdropdir libpcsclite)
+if [ -n "$driver_dir" ]; then
+    bundle_dir="$driver_dir/ifd-px4.bundle/Contents"
+    cat "$bundle_dir/Info.plist"
+    ls -l "$bundle_dir/Linux/libpx4ifd.so"
+fi
 
 # pcscdをデバッグモードで起動
 sudo pcscd -f -d -a

@@ -19,9 +19,9 @@ if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-for tool in dpkg-buildpackage dh gcc make; do
+for tool in dpkg-buildpackage dh gcc make pkg-config; do
     if ! command -v "$tool" >/dev/null; then
-        echo "Missing $tool. Install build-essential debhelper dpkg-dev libpcsclite-dev." >&2
+        echo "Missing $tool. Install build-essential debhelper dpkg-dev libpcsclite-dev pkg-config." >&2
         exit 1
     fi
 done
